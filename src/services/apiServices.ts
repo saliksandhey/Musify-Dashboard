@@ -1,9 +1,89 @@
 import { supabase } from "./supabase";
 import { mockArtists, mockAlbums, mockSongs, mockPlaylists } from "@/constants/mockData";
 import type { Artist, Album, Song, Playlist } from "@/types";
+import { toast } from "sonner";
+
+// ─── PREMIUM EXPO PUSH NOTIFICATION SERVICE ──────────────────────────────────
+export async function sendExpoPushNotification({
+  title,
+  subtitle,
+  body,
+  data,
+}: {
+  title: string;
+  subtitle?: string;
+  body: string;
+  data?: Record<string, any>;
+}) {
+  try {
+    console.log("🔍 Fetching user push tokens from Supabase...");
+    // 1. Fetch all registered user push tokens from Supabase
+    const { data: tokenList, error } = await supabase
+      .from("user_push_tokens")
+      .select("push_token");
+
+    if (error) {
+      console.error("❌ Error fetching user push tokens from Supabase:", error.message);
+      toast.error(`Push Token Error: ${error.message}`);
+      return;
+    }
+
+    console.log(`📋 Found ${tokenList?.length || 0} token records in database:`, tokenList);
+
+    if (tokenList && tokenList.length > 0) {
+      // 2. Format Expo Push Notification payload (Support all ExpoPushToken / ExponentPushToken formats)
+      const pushMessages = tokenList
+        .filter((item) => item.push_token && typeof item.push_token === "string" && item.push_token.trim().length > 0)
+        .map((item) => ({
+          to: item.push_token.trim(),
+          sound: "default",
+          title: title,
+          subtitle: subtitle || "Musify Exclusive",
+          body: body,
+          badge: 1,
+          priority: "high",
+          channelId: "default",
+          data: data || {},
+        }));
+
+      if (pushMessages.length === 0) {
+        console.warn("⚠️ No valid push tokens found to send.");
+        toast.warning("No valid device push tokens found in database.");
+        return;
+      }
+
+      console.log("🚀 Sending push payload to Expo Server:", pushMessages);
+
+      // 3. Dispatch to Expo Push API
+      const response = await fetch("https://exp.host/--/api/v2/push/send", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Accept-Encoding": "gzip, deflate",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(pushMessages),
+      });
+
+      const resData = await response.json();
+      console.log("📥 Expo Push API Response:", resData);
+
+      if (response.ok) {
+        toast.success(`📱 Push Notification sent to ${pushMessages.length} mobile device(s)!`);
+      } else {
+        toast.error(`Expo API Error: ${resData?.errors?.[0]?.message || "Failed to send"}`);
+      }
+    } else {
+      console.warn("⚠️ user_push_tokens table is empty in Supabase.");
+      toast.info("No mobile devices registered for push notifications yet.");
+    }
+  } catch (e: any) {
+    console.error("❌ Failed to send Expo push notification:", e);
+    toast.error(`Notification dispatch failed: ${e?.message || e}`);
+  }
+}
 
 // Helper: Fetch from Supabase. Return actual database rows (even if empty []).
-// Fall back to mock data ONLY if Supabase returns a network/connection error.
 async function fetchFromSupabase<T>(table: string, fallbackMock: T[], transformer?: (row: any) => T): Promise<T[]> {
   try {
     const { data, error } = await supabase.from(table).select("*").order("created_at", { ascending: false });
@@ -83,7 +163,7 @@ export const artistsApi = {
   },
 };
 
-// ─── ALBUMS API ──────────────────────────────────────────────────────────────
+// ─── ALBUMS API (With Ultra-Premium Expo Push Notification) ────────────────────
 export const albumsApi = {
   getAll: async (): Promise<Album[]> => {
     return fetchFromSupabase<Album>("albums", mockAlbums, (r: any) => ({
@@ -108,7 +188,8 @@ export const albumsApi = {
     try {
       const { data, error } = await supabase.from("albums").insert([payload]).select().single();
       if (error) throw error;
-      return {
+      
+      const newAlbum: Album = {
         id: String(data.id),
         title: data.title,
         artist_id: String(data.artist_id),
@@ -117,6 +198,22 @@ export const albumsApi = {
         release_year: Number(data.release_year),
         created_at: data.created_at,
       };
+
+      // 🚀 Dispatch Premium Mobile Notification
+      sendExpoPushNotification({
+        title: "📀 NEW ALBUM RELEASE",
+        subtitle: `${newAlbum.artist_name} · Musify Exclusive`,
+        body: `🔥 "${newAlbum.title}" by ${newAlbum.artist_name} is out now! Stream in Lossless Audio 🎧`,
+        data: {
+          type: "album_release",
+          albumId: newAlbum.id,
+          artistName: newAlbum.artist_name,
+          title: newAlbum.title,
+          coverUrl: newAlbum.cover_url,
+        },
+      });
+
+      return newAlbum;
     } catch (e) {
       console.error("Supabase create album failed:", e);
       return { ...album, id: `al-${Date.now()}` };
@@ -149,7 +246,7 @@ export const albumsApi = {
   },
 };
 
-// ─── SONGS API (Supports language column) ──────────────────────────────────────
+// ─── SONGS API ───────────────────────────────────────────────────────────────
 export const songsApi = {
   getAll: async (): Promise<Song[]> => {
     return fetchFromSupabase<Song>("songs", mockSongs, (r: any) => ({
@@ -172,8 +269,8 @@ export const songsApi = {
       title: song.title,
       artist_id: song.artist_id,
       artist_name: song.artist_name || "Unknown Artist",
-      album_id: song.album_id || null,
-      album_name: song.album_name || null,
+      album_id: song.album_id && song.album_id.trim() !== "" ? song.album_id : null,
+      album_name: song.album_id && song.album_id.trim() !== "" ? song.album_name : "Single",
       cover_url: song.cover_url || "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?q=80&w=600&h=600",
       audio_url: song.audio_url || "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
       duration: Number(song.duration ?? 180.0),
@@ -182,7 +279,8 @@ export const songsApi = {
     try {
       const { data, error } = await supabase.from("songs").insert([payload]).select().single();
       if (error) throw error;
-      return {
+
+      const newSong: Song = {
         id: String(data.id),
         title: data.title,
         artist_id: String(data.artist_id),
@@ -195,6 +293,22 @@ export const songsApi = {
         language: data.language || payload.language,
         created_at: data.created_at,
       };
+
+      // 🚀 Dispatch Premium Track Notification
+      sendExpoPushNotification({
+        title: "🎵 FRESH TRACK DROPPED",
+        subtitle: `${newSong.artist_name} · ${newSong.language || "Trending"}`,
+        body: `✨ "${newSong.title}" is now live on Musify. Tap to listen! 🎧`,
+        data: {
+          type: "song_release",
+          songId: newSong.id,
+          artistName: newSong.artist_name,
+          title: newSong.title,
+          coverUrl: newSong.cover_url,
+        },
+      });
+
+      return newSong;
     } catch (e) {
       console.error("Supabase create song failed:", e);
       return { ...song, id: `s-${Date.now()}` };
@@ -207,8 +321,10 @@ export const songsApi = {
       if (updates.title !== undefined) payload.title = updates.title;
       if (updates.artist_id !== undefined) payload.artist_id = updates.artist_id;
       if (updates.artist_name !== undefined) payload.artist_name = updates.artist_name;
-      if (updates.album_id !== undefined) payload.album_id = updates.album_id || null;
-      if (updates.album_name !== undefined) payload.album_name = updates.album_name || null;
+      if (updates.album_id !== undefined) {
+        payload.album_id = updates.album_id && updates.album_id.trim() !== "" ? updates.album_id : null;
+        payload.album_name = updates.album_id && updates.album_id.trim() !== "" ? updates.album_name : "Single";
+      }
       if (updates.cover_url !== undefined) payload.cover_url = updates.cover_url;
       if (updates.audio_url !== undefined) payload.audio_url = updates.audio_url;
       if (updates.duration !== undefined) payload.duration = updates.duration;

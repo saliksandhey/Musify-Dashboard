@@ -31,7 +31,7 @@ export default function SongsPage() {
   const [formData, setFormData] = useState({
     title: "",
     artist_id: "",
-    album_id: "",
+    album_id: "", // Default to empty string (Single track, no album)
     cover_url: "",
     audio_url: "",
     duration: 180,
@@ -80,11 +80,10 @@ export default function SongsPage() {
   const handleOpenCreate = () => {
     setEditingSong(null);
     const firstArtistId = artists[0]?.id || "";
-    const artistAlbums = albums.filter((al) => al.artist_id === firstArtistId);
     setFormData({
       title: "",
       artist_id: firstArtistId,
-      album_id: artistAlbums[0]?.id || albums[0]?.id || "",
+      album_id: "", // Explicitly default to empty string so it stays a Single track unless changed
       cover_url: "",
       audio_url: "",
       duration: 200,
@@ -100,7 +99,7 @@ export default function SongsPage() {
     setFormData({
       title: song.title,
       artist_id: song.artist_id,
-      album_id: song.album_id,
+      album_id: song.album_id || "",
       cover_url: song.cover_url,
       audio_url: song.audio_url,
       duration: song.duration,
@@ -145,7 +144,8 @@ export default function SongsPage() {
         cover_url: finalCoverUrl,
         audio_url: finalAudioUrl,
         artist_name: selectedArtist ? selectedArtist.name : editingSong.artist_name,
-        album_name: selectedAlbum ? selectedAlbum.title : editingSong.album_name,
+        album_id: formData.album_id || "",
+        album_name: selectedAlbum ? selectedAlbum.title : "Single",
       };
       await songsApi.update(editingSong.id, updates);
       setSongs((prev) =>
@@ -157,7 +157,7 @@ export default function SongsPage() {
         title: formData.title,
         artist_id: formData.artist_id,
         artist_name: selectedArtist ? selectedArtist.name : "Unknown Artist",
-        album_id: formData.album_id,
+        album_id: formData.album_id || "",
         album_name: selectedAlbum ? selectedAlbum.title : "Single",
         cover_url: finalCoverUrl,
         audio_url: finalAudioUrl,
@@ -378,7 +378,6 @@ export default function SongsPage() {
               />
             </div>
 
-            {/* Song Language Dropdown / Custom Input */}
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">Song Language Tag *</label>
               <select
@@ -402,11 +401,10 @@ export default function SongsPage() {
                 value={formData.artist_id}
                 onChange={(e) => {
                   const newArtistId = e.target.value;
-                  const firstAlbum = albums.find((al) => al.artist_id === newArtistId);
                   setFormData({
                     ...formData,
                     artist_id: newArtistId,
-                    album_id: firstAlbum?.id || albums[0]?.id || "",
+                    // Keep album_id as "" (Single) when switching artist unless explicitly selected
                   });
                 }}
                 className="w-full px-3.5 py-2.5 bg-surface-3 border border-white/8 rounded-xl text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-purple-600/40"
@@ -420,13 +418,13 @@ export default function SongsPage() {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground">Album (Dependent on Artist)</label>
+              <label className="text-xs font-medium text-muted-foreground">Album (Optional)</label>
               <select
                 value={formData.album_id}
                 onChange={(e) => setFormData({ ...formData, album_id: e.target.value })}
                 className="w-full px-3.5 py-2.5 bg-surface-3 border border-white/8 rounded-xl text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-purple-600/40"
               >
-                <option value="">None (Single)</option>
+                <option value="">None (Single Track)</option>
                 {availableAlbums.map((al) => (
                   <option key={al.id} value={al.id}>
                     {al.title}
