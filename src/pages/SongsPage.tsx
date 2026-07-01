@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { type ColumnDef } from "@tanstack/react-table";
 import { Plus, Edit2, Trash2, Play, Pause, Music, Eye, Globe } from "lucide-react";
 import { toast } from "sonner";
@@ -16,6 +17,7 @@ import { formatDuration } from "@/utils";
 const LANGUAGES = ["Hindi", "English", "Punjabi", "Tamil", "Telugu", "Bengali", "Spanish", "French", "German"];
 
 export default function SongsPage() {
+  const navigate = useNavigate();
   const [songs, setSongs] = useState<Song[]>([]);
   const [artists, setArtists] = useState<Artist[]>([]);
   const [albums, setAlbums] = useState<Album[]>([]);
@@ -277,13 +279,21 @@ export default function SongsPage() {
         title="Songs Module"
         description="Manage master audio tracks, languages, and previews in Supabase."
         actions={
-          <button
-            onClick={handleOpenCreate}
-            className="flex items-center gap-2 px-4 py-2.5 bg-purple-gradient text-white rounded-xl font-semibold text-sm shadow-glow-purple-sm hover:shadow-glow-purple transition"
-          >
-            <Plus size={16} />
-            Add Song
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => navigate("/songs/bulk-upload")}
+              className="flex items-center gap-2 px-4 py-2.5 bg-surface-2 hover:bg-white/10 text-foreground rounded-xl font-semibold text-sm transition border border-white/5"
+            >
+              Bulk Upload
+            </button>
+            <button
+              onClick={handleOpenCreate}
+              className="flex items-center gap-2 px-4 py-2.5 bg-purple-gradient text-white rounded-xl font-semibold text-sm shadow-glow-purple-sm hover:shadow-glow-purple transition"
+            >
+              <Plus size={16} />
+              Add Song
+            </button>
+          </div>
         }
       />
 
@@ -339,7 +349,12 @@ export default function SongsPage() {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <FileUploadZone accept="image" value={coverFile} onChange={setCoverFile} label="Cover Artwork" />
-            <FileUploadZone accept="audio" value={audioFile} onChange={setAudioFile} label="Audio File" />
+            <FileUploadZone accept="audio" value={audioFile} onChange={(file) => {
+              setAudioFile(file);
+              if (file && !formData.title) {
+                setFormData((prev) => ({ ...prev, title: file.name.replace(/\.[^/.]+$/, "") }));
+              }
+            }} label="Audio File" />
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

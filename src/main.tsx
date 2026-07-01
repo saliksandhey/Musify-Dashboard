@@ -18,6 +18,7 @@ const SongsPage = lazy(() => import("@/pages/SongsPage"));
 const PlaylistsPage = lazy(() => import("@/pages/PlaylistsPage"));
 const SettingsPage = lazy(() => import("@/pages/SettingsPage"));
 const BrowseArtistPage = lazy(() => import("@/pages/BrowseArtistPage"));
+const BulkUploadPage = lazy(() => import("@/pages/BulkUploadPage"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -72,11 +73,24 @@ const router = createBrowserRouter([
       },
       {
         path: "songs",
-        element: (
-          <Suspense fallback={<PageLoader />}>
-            <SongsPage />
-          </Suspense>
-        ),
+        children: [
+          {
+            index: true,
+            element: (
+              <Suspense fallback={<PageLoader />}>
+                <SongsPage />
+              </Suspense>
+            ),
+          },
+          {
+            path: "bulk-upload",
+            element: (
+              <Suspense fallback={<PageLoader />}>
+                <BulkUploadPage />
+              </Suspense>
+            ),
+          },
+        ],
       },
       {
         path: "playlists",

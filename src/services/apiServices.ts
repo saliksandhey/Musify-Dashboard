@@ -264,7 +264,7 @@ export const songsApi = {
     }));
   },
 
-  create: async (song: Omit<Song, "id">): Promise<Song> => {
+  create: async (song: Omit<Song, "id">, skipNotification?: boolean): Promise<Song> => {
     const payload = {
       title: song.title,
       artist_id: song.artist_id,
@@ -295,18 +295,20 @@ export const songsApi = {
       };
 
       // 🚀 Dispatch Premium Track Notification
-      sendExpoPushNotification({
-        title: "🎵 FRESH TRACK DROPPED",
-        subtitle: `${newSong.artist_name} · ${newSong.language || "Trending"}`,
-        body: `✨ "${newSong.title}" is now live on Musify. Tap to listen! 🎧`,
-        data: {
-          type: "song_release",
-          songId: newSong.id,
-          artistName: newSong.artist_name,
-          title: newSong.title,
-          coverUrl: newSong.cover_url,
-        },
-      });
+      if (!skipNotification) {
+        sendExpoPushNotification({
+          title: "🎵 FRESH TRACK DROPPED",
+          subtitle: `${newSong.artist_name} · ${newSong.language || "Trending"}`,
+          body: `✨ "${newSong.title}" is now live on Musify. Tap to listen! 🎧`,
+          data: {
+            type: "song_release",
+            songId: newSong.id,
+            artistName: newSong.artist_name,
+            title: newSong.title,
+            coverUrl: newSong.cover_url,
+          },
+        });
+      }
 
       return newSong;
     } catch (e) {
