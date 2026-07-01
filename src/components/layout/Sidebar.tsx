@@ -21,6 +21,7 @@ const navItems = [
   { to: "/albums", icon: Disc3, label: "Albums" },
   { to: "/songs", icon: Music, label: "Songs" },
   { to: "/playlists", icon: ListMusic, label: "Playlists" },
+  { to: "/browse", icon: Music2, label: "Browse" },
   { to: "/settings", icon: Settings, label: "Settings" },
 ];
 

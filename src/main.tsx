@@ -17,6 +17,7 @@ const AlbumsPage = lazy(() => import("@/pages/AlbumsPage"));
 const SongsPage = lazy(() => import("@/pages/SongsPage"));
 const PlaylistsPage = lazy(() => import("@/pages/PlaylistsPage"));
 const SettingsPage = lazy(() => import("@/pages/SettingsPage"));
+const BrowseArtistPage = lazy(() => import("@/pages/BrowseArtistPage"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -82,6 +83,14 @@ const router = createBrowserRouter([
         element: (
           <Suspense fallback={<PageLoader />}>
             <PlaylistsPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: "browse",
+        element: (
+          <Suspense fallback={<PageLoader />}>
+            <BrowseArtistPage />
           </Suspense>
         ),
       },
