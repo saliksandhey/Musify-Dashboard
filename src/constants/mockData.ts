@@ -1,4 +1,12 @@
-import type { Artist, Album, Song, Playlist } from "@/types";
+import type { Artist, Album, Song, Playlist, User } from "@/types";
+
+export const mockUsers: User[] = [
+  { id: "u1", name: "Salik Sandhey", email: "admin@musify.com", avatar_url: "https://i.pravatar.cc/150?img=11", role: "admin", status: "active", created_at: "2024-01-15T08:00:00Z" },
+  { id: "u2", name: "Aarav Sharma", email: "aarav@example.com", avatar_url: "https://i.pravatar.cc/150?img=12", role: "user", status: "active", created_at: "2024-02-10T14:30:00Z" },
+  { id: "u3", name: "Priya Patel", email: "priya@example.com", avatar_url: "https://i.pravatar.cc/150?img=5", role: "user", status: "banned", created_at: "2024-03-22T09:15:00Z" },
+  { id: "u4", name: "Rahul Verma", email: "rahul@example.com", avatar_url: "https://i.pravatar.cc/150?img=33", role: "user", status: "active", created_at: "2024-04-05T18:45:00Z" },
+  { id: "u5", name: "Sneha Reddy", email: "sneha@example.com", avatar_url: "https://i.pravatar.cc/150?img=44", role: "admin", status: "active", created_at: "2024-05-12T11:20:00Z" },
+];
 
 export const mockArtists: Artist[] = [
   { id: "a1", name: "Luna Velvet", image_url: "https://i.pravatar.cc/150?img=47", verified: true, monthly_listeners: 28400000 },

@@ -10,6 +10,8 @@ import {
   LogOut,
   ChevronLeft,
   Music2,
+  Users,
+  Bell,
   X,
 } from "lucide-react";
 import { cn } from "@/utils";
@@ -22,6 +24,8 @@ const navItems = [
   { to: "/songs", icon: Music, label: "Songs" },
   { to: "/playlists", icon: ListMusic, label: "Playlists" },
   { to: "/browse", icon: Music2, label: "Browse" },
+  { to: "/users", icon: Users, label: "Users" },
+  { to: "/notifications", icon: Bell, label: "Notifications" },
   { to: "/settings", icon: Settings, label: "Settings" },
 ];
 

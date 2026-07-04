@@ -1,6 +1,6 @@
-import { supabase } from "./supabase";
-import { mockArtists, mockAlbums, mockSongs, mockPlaylists } from "@/constants/mockData";
-import type { Artist, Album, Song, Playlist } from "@/types";
+import { supabase, supabaseAdmin } from "./supabase";
+import { mockArtists, mockAlbums, mockSongs, mockPlaylists, mockUsers } from "@/constants/mockData";
+import type { Artist, Album, Song, Playlist, User } from "@/types";
 import { toast } from "sonner";
 
 // ─── PREMIUM EXPO PUSH NOTIFICATION SERVICE ──────────────────────────────────
@@ -100,6 +100,60 @@ async function fetchFromSupabase<T>(table: string, fallbackMock: T[], transforme
     return fallbackMock;
   }
 }
+
+// ─── USERS API ─────────────────────────────────────────────────────────────
+export const usersApi = {
+  getAll: async (): Promise<User[]> => {
+    try {
+      const { data, error } = await supabaseAdmin.auth.admin.listUsers();
+      if (error) throw error;
+      
+      return data.users.map((u) => ({
+        id: u.id,
+        name: u.user_metadata?.full_name || u.user_metadata?.name || "Unknown User",
+        email: u.email || "No Email",
+        avatar_url: u.user_metadata?.avatar_url || "https://i.pravatar.cc/150",
+        role: u.user_metadata?.role === "admin" ? "admin" : "user",
+        status: u.user_metadata?.status === "banned" ? "banned" : "active",
+        created_at: u.created_at,
+      }));
+    } catch (e) {
+      console.error("Failed to fetch users from auth.admin:", e);
+      return mockUsers;
+    }
+  },
+  
+  updateRole: async (id: string, role: "admin" | "user"): Promise<void> => {
+    try {
+      const { error } = await supabaseAdmin.auth.admin.updateUserById(id, {
+        user_metadata: { role }
+      });
+      if (error) throw error;
+    } catch (e) {
+      console.error("Supabase update role failed:", e);
+    }
+  },
+
+  updateStatus: async (id: string, status: "active" | "banned"): Promise<void> => {
+    try {
+      const { error } = await supabaseAdmin.auth.admin.updateUserById(id, {
+        user_metadata: { status }
+      });
+      if (error) throw error;
+    } catch (e) {
+      console.error("Supabase update status failed:", e);
+    }
+  },
+
+  delete: async (id: string): Promise<void> => {
+    try {
+      const { error } = await supabaseAdmin.auth.admin.deleteUser(id);
+      if (error) throw error;
+    } catch (e) {
+      console.error("Supabase delete user failed:", e);
+    }
+  },
+};
 
 // ─── ARTISTS API ─────────────────────────────────────────────────────────────
 export const artistsApi = {
@@ -482,5 +536,55 @@ export const storageApi = {
       console.warn("Supabase storage error:", e);
     }
     return URL.createObjectURL(file);
+  },
+};
+
+// ─── NOTIFICATIONS API (ONESIGNAL DIRECT) ────────────────────────────────────
+export const notificationsApi = {
+  sendPushNotification: async (payload: {
+    title: string;
+    message: string;
+    target: string;
+    artwork?: string;
+    subtitle?: string;
+    deepLinkData?: { type: string; id: string };
+  }) => {
+    try {
+      const appId = import.meta.env.VITE_ONESIGNAL_APP_ID;
+      const apiKey = import.meta.env.VITE_ONESIGNAL_REST_API_KEY;
+
+      if (!appId || !apiKey) {
+        throw new Error("OneSignal keys are missing in environment variables.");
+      }
+
+      const response = await fetch("https://onesignal.com/api/v1/notifications", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Basic ${apiKey}`,
+        },
+        body: JSON.stringify({
+          app_id: appId,
+          included_segments: ["Subscribed Users", "Active Users", "Total Subscriptions"],
+          headings: { en: payload.title },
+          contents: { en: payload.message },
+          subtitle: payload.subtitle ? { en: payload.subtitle } : undefined,
+          big_picture: payload.artwork || undefined,
+          ios_attachments: payload.artwork ? { id1: payload.artwork } : undefined,
+          data: payload.deepLinkData || undefined,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(`OneSignal API Error: ${JSON.stringify(errorData)}`);
+      }
+
+      const data = await response.json();
+      return data;
+    } catch (e) {
+      console.error("Failed to send push notification via OneSignal:", e);
+      throw e;
+    }
   },
 };

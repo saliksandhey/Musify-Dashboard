@@ -23,3 +23,7 @@ dist-isolation
 *.njsproj
 *.sln
 *.sw?
+
+# Environment variables
+.env
+.env.*

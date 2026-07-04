@@ -1,3 +1,13 @@
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+  avatar_url?: string;
+  role: "admin" | "user";
+  status: "active" | "banned";
+  created_at?: string;
+}
+
 export interface Artist {
   id: string;
   name: string;
