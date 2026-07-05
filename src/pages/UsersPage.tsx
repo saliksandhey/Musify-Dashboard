@@ -241,7 +241,7 @@ export default function UsersPage() {
 
       <div className="glass-card rounded-2xl overflow-hidden border border-white/5 shadow-glass">
         {loading ? (
-          <TableSkeleton rows={5} columns={5} />
+          <TableSkeleton rows={5} />
         ) : (
           <DataTable columns={columns} data={filteredUsers} />
         )}
