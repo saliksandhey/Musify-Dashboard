@@ -1,6 +1,6 @@
 import { supabase, supabaseAdmin } from "./supabase";
 import { mockArtists, mockAlbums, mockSongs, mockPlaylists, mockUsers } from "@/constants/mockData";
-import type { Artist, Album, Song, Playlist, User } from "@/types";
+import type { Artist, Album, Song, Playlist, User, HeroBanner } from "@/types";
 import { toast } from "sonner";
 
 // ─── PREMIUM EXPO PUSH NOTIFICATION SERVICE ──────────────────────────────────
@@ -586,5 +586,51 @@ export const notificationsApi = {
       console.error("Failed to send push notification via OneSignal:", e);
       throw e;
     }
+  },
+};
+
+// ─── HERO BANNERS API ──────────────────────────────────────────────────────
+export const heroBannersApi = {
+  getAll: async () => {
+    const { data, error } = await supabase
+      .from("hero_banners")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    return data as HeroBanner[];
+  },
+  create: async (banner: Omit<HeroBanner, "id" | "created_at">) => {
+    const { data, error } = await supabase
+      .from("hero_banners")
+      .insert([banner])
+      .select()
+      .single();
+    if (error) throw error;
+    return data as HeroBanner;
+  },
+  update: async (id: string, updates: Partial<Omit<HeroBanner, "id" | "created_at">>) => {
+    const { data, error } = await supabase
+      .from("hero_banners")
+      .update(updates)
+      .eq("id", id)
+      .select()
+      .single();
+    if (error) throw error;
+    return data as HeroBanner;
+  },
+  delete: async (id: string) => {
+    const { error } = await supabase.from("hero_banners").delete().eq("id", id);
+    if (error) throw error;
+    return true;
+  },
+  toggleActive: async (id: string, is_active: boolean) => {
+    const { data, error } = await supabase
+      .from("hero_banners")
+      .update({ is_active })
+      .eq("id", id)
+      .select()
+      .single();
+    if (error) throw error;
+    return data as HeroBanner;
   },
 };

@@ -21,6 +21,7 @@ const BrowseArtistPage = lazy(() => import("@/pages/BrowseArtistPage"));
 const BulkUploadPage = lazy(() => import("@/pages/BulkUploadPage"));
 const UsersPage = lazy(() => import("@/pages/UsersPage"));
 const PushNotificationsPage = lazy(() => import("@/pages/PushNotificationsPage"));
+const HeroBannersPage = lazy(() => import("@/pages/HeroBannersPage"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -115,6 +116,14 @@ const router = createBrowserRouter([
         element: (
           <Suspense fallback={<PageLoader />}>
             <PushNotificationsPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: "hero-banners",
+        element: (
+          <Suspense fallback={<PageLoader />}>
+            <HeroBannersPage />
           </Suspense>
         ),
       },

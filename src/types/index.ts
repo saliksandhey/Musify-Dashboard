@@ -55,3 +55,16 @@ export interface PlaylistSong {
   playlist_id: string;
   song_id: string;
 }
+
+export interface HeroBanner {
+  id: string;
+  title: string;
+  subtitle: string | null;
+  image_url: string;
+  tag_text: string;
+  button_text: string;
+  action_type: 'play_song' | 'play_album' | 'open_playlist' | 'open_url';
+  action_id: string;
+  is_active: boolean;
+  created_at: string;
+}

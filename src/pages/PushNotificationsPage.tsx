@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
-import { Bell, Music, Disc3, Send, AlertCircle, Loader2 } from "lucide-react";
+import { Bell, Music, Disc3, Send, AlertCircle, Loader2, LayoutGrid, Image as ImageIcon, Type, Plus, X } from "lucide-react";
 import { toast } from "sonner";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 
 import PageWrapper, { PageHeader } from "@/components/ui/PageWrapper";
 import { songsApi, albumsApi, notificationsApi } from "@/services/apiServices";
@@ -9,9 +9,11 @@ import type { Song, Album } from "@/types";
 import { cn } from "@/utils";
 
 type NotificationType = "custom" | "song" | "album";
+type TemplateType = "standard" | "thumbnail" | "grid";
 
 export default function PushNotificationsPage() {
   const [activeTab, setActiveTab] = useState<NotificationType>("custom");
+  const [templateType, setTemplateType] = useState<TemplateType>("standard");
   const [loadingItems, setLoadingItems] = useState(false);
   
   // Data for lists
@@ -22,6 +24,8 @@ export default function PushNotificationsPage() {
   const [formTitle, setFormTitle] = useState("");
   const [formMessage, setFormMessage] = useState("");
   const [formImageUrl, setFormImageUrl] = useState("");
+  const [gridImages, setGridImages] = useState<string[]>([""]); // start with one empty input
+  
   const [selectedItem, setSelectedItem] = useState<Song | Album | null>(null);
   const [isSending, setIsSending] = useState(false);
 
@@ -33,7 +37,6 @@ export default function PushNotificationsPage() {
   const fetchSongs = async () => {
     setLoadingItems(true);
     const data = await songsApi.getAll();
-    // Sort descending by created_at or default fallback and get top 20
     const sorted = data.sort((a, b) => {
       const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
       const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
@@ -60,6 +63,7 @@ export default function PushNotificationsPage() {
     setFormTitle(`🎵 NEW RELEASE: ${song.title}`);
     setFormMessage(`${song.artist_name || 'Your favorite artist'} just dropped a new track! Listen now.`);
     setFormImageUrl(song.cover_url);
+    if (templateType === 'grid') setTemplateType('thumbnail'); // default to thumbnail for single items
   };
 
   const handleSelectAlbum = (album: Album) => {
@@ -67,6 +71,7 @@ export default function PushNotificationsPage() {
     setFormTitle(`💿 NEW ALBUM: ${album.title}`);
     setFormMessage(`Stream the highly anticipated new album by ${album.artist_name || 'your favorite artist'} today.`);
     setFormImageUrl(album.cover_url);
+    if (templateType === 'grid') setTemplateType('thumbnail');
   };
 
   const handleTabSwitch = (tab: NotificationType) => {
@@ -77,6 +82,22 @@ export default function PushNotificationsPage() {
       setFormMessage("");
       setFormImageUrl("");
     }
+  };
+
+  const updateGridImage = (index: number, val: string) => {
+    const newImages = [...gridImages];
+    newImages[index] = val;
+    setGridImages(newImages);
+  };
+
+  const addGridImage = () => {
+    if (gridImages.length < 8) {
+      setGridImages([...gridImages, ""]);
+    }
+  };
+
+  const removeGridImage = (index: number) => {
+    setGridImages(gridImages.filter((_, i) => i !== index));
   };
 
   const handleSend = async () => {
@@ -91,8 +112,14 @@ export default function PushNotificationsPage() {
         title: formTitle,
         message: formMessage,
         target: "segment_all",
-        artwork: formImageUrl || undefined,
+        template: templateType,
       };
+
+      if (templateType === 'thumbnail') {
+        payload.artwork = formImageUrl || undefined;
+      } else if (templateType === 'grid') {
+        payload.grid_images = gridImages.filter(img => img.trim() !== "");
+      }
 
       if (activeTab !== "custom" && selectedItem) {
         payload.subtitle = (selectedItem as any).title;
@@ -109,6 +136,7 @@ export default function PushNotificationsPage() {
       setFormTitle("");
       setFormMessage("");
       setFormImageUrl("");
+      setGridImages([""]);
       setSelectedItem(null);
     } catch (e: any) {
       toast.error(e.message || "Failed to send notification");
@@ -116,6 +144,8 @@ export default function PushNotificationsPage() {
       setIsSending(false);
     }
   };
+
+  const validGridImages = gridImages.filter(img => img.trim() !== "");
 
   return (
     <PageWrapper>
@@ -200,9 +230,55 @@ export default function PushNotificationsPage() {
           )}
 
           {/* Notification Editor Form */}
-          <div className="glass-card rounded-2xl p-6 border border-white/5 flex flex-col gap-5 relative overflow-hidden">
-            <h3 className="text-lg font-bold text-white mb-2">Notification Payload</h3>
+          <div className="glass-card rounded-2xl p-6 border border-white/5 flex flex-col gap-6 relative overflow-hidden">
+            <h3 className="text-lg font-bold text-white mb-1">Notification Payload</h3>
             
+            {/* Template Selection */}
+            <div className="flex flex-col gap-3">
+              <label className="text-sm font-medium text-muted-foreground">Notification Template</label>
+              <div className="grid grid-cols-3 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setTemplateType("standard")}
+                  className={cn(
+                    "flex flex-col items-center justify-center gap-2 p-4 rounded-xl border transition-all",
+                    templateType === "standard" 
+                      ? "bg-purple-500/20 border-purple-500 text-white" 
+                      : "bg-surface-3 border-white/5 text-muted-foreground hover:bg-surface-4"
+                  )}
+                >
+                  <Type size={24} />
+                  <span className="text-xs font-semibold">Standard</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTemplateType("thumbnail")}
+                  className={cn(
+                    "flex flex-col items-center justify-center gap-2 p-4 rounded-xl border transition-all",
+                    templateType === "thumbnail" 
+                      ? "bg-purple-500/20 border-purple-500 text-white" 
+                      : "bg-surface-3 border-white/5 text-muted-foreground hover:bg-surface-4"
+                  )}
+                >
+                  <ImageIcon size={24} />
+                  <span className="text-xs font-semibold">Thumbnail</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTemplateType("grid")}
+                  className={cn(
+                    "flex flex-col items-center justify-center gap-2 p-4 rounded-xl border transition-all",
+                    templateType === "grid" 
+                      ? "bg-purple-500/20 border-purple-500 text-white" 
+                      : "bg-surface-3 border-white/5 text-muted-foreground hover:bg-surface-4"
+                  )}
+                >
+                  <LayoutGrid size={24} />
+                  <span className="text-xs font-semibold">Grid / Carousel</span>
+                </button>
+              </div>
+            </div>
+
             <div className="flex flex-col gap-1.5">
               <label className="text-sm font-medium text-muted-foreground">Notification Title *</label>
               <input
@@ -225,16 +301,66 @@ export default function PushNotificationsPage() {
               />
             </div>
 
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-medium text-muted-foreground">Artwork Image URL (Optional)</label>
-              <input
-                type="text"
-                value={formImageUrl}
-                onChange={(e) => setFormImageUrl(e.target.value)}
-                placeholder="https://example.com/image.jpg"
-                className="px-4 py-2.5 bg-surface-3 border border-white/10 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-600/50 text-white placeholder:text-white/20 transition"
-              />
-            </div>
+            {/* Thumbnail Upload */}
+            {templateType === "thumbnail" && (
+              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="flex flex-col gap-1.5">
+                <label className="text-sm font-medium text-muted-foreground">Artwork Image URL (For Thumbnail)</label>
+                <input
+                  type="text"
+                  value={formImageUrl}
+                  onChange={(e) => setFormImageUrl(e.target.value)}
+                  placeholder="https://example.com/image.jpg"
+                  className="px-4 py-2.5 bg-surface-3 border border-white/10 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-600/50 text-white placeholder:text-white/20 transition"
+                />
+              </motion.div>
+            )}
+
+            {/* Grid Upload */}
+            {templateType === "grid" && (
+              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium text-muted-foreground">Grid Images (URLs) - Up to 8</label>
+                  <span className="text-xs text-white/40">{gridImages.length} / 8</span>
+                </div>
+                
+                <div className="flex flex-col gap-2">
+                  <AnimatePresence>
+                    {gridImages.map((img, i) => (
+                      <motion.div 
+                        initial={{ opacity: 0, y: -10 }} 
+                        animate={{ opacity: 1, y: 0 }} 
+                        exit={{ opacity: 0, scale: 0.95 }}
+                        key={i} 
+                        className="flex gap-2"
+                      >
+                        <input
+                          type="text"
+                          value={img}
+                          onChange={(e) => updateGridImage(i, e.target.value)}
+                          placeholder="https://example.com/poster.jpg"
+                          className="flex-1 px-4 py-2 bg-surface-3 border border-white/10 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-600/50 text-white placeholder:text-white/20 transition"
+                        />
+                        <button 
+                          onClick={() => removeGridImage(i)}
+                          className="p-2.5 bg-surface-3 hover:bg-red-500/20 text-muted-foreground hover:text-red-400 border border-white/10 rounded-xl transition-colors"
+                        >
+                          <X size={16} />
+                        </button>
+                      </motion.div>
+                    ))}
+                  </AnimatePresence>
+                </div>
+                
+                {gridImages.length < 8 && (
+                  <button 
+                    onClick={addGridImage}
+                    className="flex items-center justify-center gap-2 py-2 mt-1 border border-dashed border-white/20 rounded-xl text-sm text-muted-foreground hover:text-white hover:border-white/40 transition-colors"
+                  >
+                    <Plus size={16} /> Add Another Image
+                  </button>
+                )}
+              </motion.div>
+            )}
 
             <button
               onClick={handleSend}
@@ -281,7 +407,7 @@ export default function PushNotificationsPage() {
               {/* Notification Card UI */}
               <motion.div 
                 layout
-                className="bg-[#242736]/90 backdrop-blur-xl border border-white/10 rounded-2xl mx-1 overflow-hidden shadow-2xl shadow-black/50"
+                className="bg-[#242736]/90 backdrop-blur-xl border border-white/10 rounded-2xl mx-1 overflow-hidden shadow-2xl shadow-black/50 flex flex-col"
               >
                 {/* Header */}
                 <div className="flex items-center justify-between px-3 py-2 bg-white/5">
@@ -300,24 +426,43 @@ export default function PushNotificationsPage() {
                     <h4 className="text-sm font-semibold text-white/90 leading-tight">
                       {formTitle || "Notification Title"}
                     </h4>
+                    {/* Hide message if Grid, as grid usually takes space, but keeping it small is fine */}
                     <p className="text-sm text-white/60 leading-snug line-clamp-2">
                       {formMessage || "This is how your notification message will look to the users on their lockscreen."}
                     </p>
                   </div>
-                  {/* Small Square Art Fallback if no big image, or just keeping it simple */}
+                  
+                  {/* Thumbnail Image */}
+                  {templateType === "thumbnail" && formImageUrl && (
+                    <div className="w-12 h-12 flex-shrink-0 bg-surface-1 rounded border border-white/5 overflow-hidden">
+                      <img 
+                        src={formImageUrl} 
+                        alt="" 
+                        className="w-full h-full object-cover" 
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                      />
+                    </div>
+                  )}
                 </div>
 
-                {/* Big Image if provided */}
-                {formImageUrl && (
-                  <div className="w-full aspect-[2/1] bg-surface-1 border-t border-white/5 relative">
-                    <img 
-                      src={formImageUrl} 
-                      alt="Notification Artwork" 
-                      className="w-full h-full object-cover" 
-                      onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
-                    />
+                {/* Grid Images */}
+                {templateType === "grid" && validGridImages.length > 0 && (
+                  <div className="px-4 pb-4">
+                    <div className="grid grid-cols-4 gap-2">
+                      {validGridImages.map((img, i) => (
+                        <div key={i} className="aspect-[3/4] bg-surface-1 rounded-md overflow-hidden border border-white/5 relative">
+                          <img 
+                            src={img} 
+                            alt="" 
+                            className="w-full h-full object-cover"
+                            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                          />
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
+                
               </motion.div>
 
               <div className="absolute bottom-2 left-1/2 -translate-x-1/2 w-1/3 h-1 bg-white/20 rounded-full" />

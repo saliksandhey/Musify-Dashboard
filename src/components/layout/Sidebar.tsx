@@ -13,6 +13,7 @@ import {
   Users,
   Bell,
   X,
+  LayoutTemplate,
 } from "lucide-react";
 import { cn } from "@/utils";
 import { toast } from "sonner";
@@ -26,6 +27,7 @@ const navItems = [
   { to: "/browse", icon: Music2, label: "Browse" },
   { to: "/users", icon: Users, label: "Users" },
   { to: "/notifications", icon: Bell, label: "Notifications" },
+  { to: "/hero-banners", icon: LayoutTemplate, label: "Hero Banners" },
   { to: "/settings", icon: Settings, label: "Settings" },
 ];
 
