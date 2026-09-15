@@ -1,272 +1,145 @@
 import { useState, useMemo, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
-import { type ColumnDef } from "@tanstack/react-table";
-import { Plus, Edit2, Trash2, Play, Pause, Music, Eye, Globe } from "lucide-react";
-import { toast } from "sonner";
+import { Play, Pause, Music, Search, Globe, Volume2 } from "lucide-react";
 import PageWrapper, { PageHeader } from "@/components/ui/PageWrapper";
 import DataTable from "@/components/ui/DataTable";
 import SearchInput from "@/components/ui/SearchInput";
-import Modal from "@/components/ui/Modal";
-import FileUploadZone from "@/components/ui/FileUploadZone";
-import ConfirmationDialog from "@/components/ui/ConfirmationDialog";
 import { TableSkeleton } from "@/components/ui/Skeleton";
-import { songsApi, artistsApi, albumsApi, storageApi } from "@/services/apiServices";
-import type { Song, Artist, Album } from "@/types";
+import { songsApi } from "@/services/apiServices";
+import type { Song } from "@/types";
 import { formatDuration } from "@/utils";
 
-const LANGUAGES = ["Hindi", "English", "Punjabi", "Tamil", "Telugu", "Bengali", "Spanish", "French", "German"];
+const LANGUAGES = ["Hindi", "Punjabi", "English", "Tamil", "Telugu", "Bengali", "Spanish", "French", "German"];
 
 export default function SongsPage() {
-  const navigate = useNavigate();
   const [songs, setSongs] = useState<Song[]>([]);
-  const [artists, setArtists] = useState<Artist[]>([]);
-  const [albums, setAlbums] = useState<Album[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [languageFilter, setLanguageFilter] = useState("all");
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingSong, setEditingSong] = useState<Song | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<Song | null>(null);
   const [playingSongId, setPlayingSongId] = useState<string | null>(null);
-  const [previewMedia, setPreviewMedia] = useState<{ type: "cover" | "audio"; url: string; title: string } | null>(null);
+  const [previewAudioUrl, setPreviewAudioUrl] = useState<{ url: string; title: string; artist: string } | null>(null);
 
-  const [formData, setFormData] = useState({
-    title: "",
-    artist_id: "",
-    album_id: "", // Default to empty string (Single track, no album)
-    cover_url: "",
-    audio_url: "",
-    duration: 180,
-    language: "Hindi",
-  });
-  const [coverFile, setCoverFile] = useState<File | null>(null);
-  const [audioFile, setAudioFile] = useState<File | null>(null);
-
+  // Debounced search for JioSaavn API based on search query or selected language
   useEffect(() => {
-    loadData();
-  }, []);
+    const timer = setTimeout(() => {
+      const q = search.trim() || (languageFilter !== "all" ? languageFilter : "trending");
+      loadSongs(q);
+    }, 400);
 
-  const loadData = async () => {
+    return () => clearTimeout(timer);
+  }, [search, languageFilter]);
+
+  const loadSongs = async (query: string) => {
     setLoading(true);
-    const [songsData, artistsData, albumsData] = await Promise.all([
-      songsApi.getAll(),
-      artistsApi.getAll(),
-      albumsApi.getAll(),
-    ]);
-    setSongs(songsData);
-    setArtists(artistsData);
-    setAlbums(albumsData);
-    if (artistsData.length > 0) {
-      setFormData((prev) => ({ ...prev, artist_id: artistsData[0].id }));
-    }
+    const data = await songsApi.search(query);
+    setSongs(data);
     setLoading(false);
   };
 
-  const availableAlbums = useMemo(() => {
-    if (!formData.artist_id) return albums;
-    return albums.filter((al) => al.artist_id === formData.artist_id);
-  }, [albums, formData.artist_id]);
-
   const filteredSongs = useMemo(() => {
-    return songs.filter((s) => {
-      const matchesSearch =
-        s.title.toLowerCase().includes(search.toLowerCase()) ||
-        (s.artist_name && s.artist_name.toLowerCase().includes(search.toLowerCase())) ||
-        (s.album_name && s.album_name.toLowerCase().includes(search.toLowerCase())) ||
-        (s.language && s.language.toLowerCase().includes(search.toLowerCase()));
-      const matchesLang = languageFilter === "all" || s.language === languageFilter;
-      return matchesSearch && matchesLang;
-    });
-  }, [songs, search, languageFilter]);
+    if (languageFilter === "all") return songs;
+    // Keep tracks matching selected language or all returned from api
+    return songs.filter((s) => !s.language || s.language.toLowerCase() === languageFilter.toLowerCase() || search.length > 0);
+  }, [songs, languageFilter, search]);
 
-  const handleOpenCreate = () => {
-    setEditingSong(null);
-    const firstArtistId = artists[0]?.id || "";
-    setFormData({
-      title: "",
-      artist_id: firstArtistId,
-      album_id: "", // Explicitly default to empty string so it stays a Single track unless changed
-      cover_url: "",
-      audio_url: "",
-      duration: 200,
-      language: "Hindi",
-    });
-    setCoverFile(null);
-    setAudioFile(null);
-    setIsModalOpen(true);
-  };
-
-  const handleOpenEdit = (song: Song) => {
-    setEditingSong(song);
-    setFormData({
-      title: song.title,
-      artist_id: song.artist_id,
-      album_id: song.album_id || "",
-      cover_url: song.cover_url,
-      audio_url: song.audio_url,
-      duration: song.duration,
-      language: song.language || "Hindi",
-    });
-    setCoverFile(null);
-    setAudioFile(null);
-    setIsModalOpen(true);
-  };
-
-  const confirmDelete = async () => {
-    if (!deleteTarget) return;
-    await songsApi.delete(deleteTarget.id);
-    setSongs((prev) => prev.filter((s) => s.id !== deleteTarget.id));
-    toast.success("Song deleted");
-    setDeleteTarget(null);
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formData.title) {
-      toast.error("Please enter a song title");
-      return;
-    }
-
-    let finalCoverUrl = formData.cover_url || editingSong?.cover_url || "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?q=80&w=600&h=600";
-    if (coverFile) {
-      finalCoverUrl = await storageApi.uploadFile("covers", coverFile);
-    }
-
-    let finalAudioUrl = formData.audio_url || editingSong?.audio_url || "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3";
-    if (audioFile) {
-      finalAudioUrl = await storageApi.uploadFile("audio", audioFile);
-    }
-
-    const selectedArtist = artists.find((a) => a.id === formData.artist_id);
-    const selectedAlbum = albums.find((al) => al.id === formData.album_id);
-
-    if (editingSong) {
-      const updates = {
-        ...formData,
-        cover_url: finalCoverUrl,
-        audio_url: finalAudioUrl,
-        artist_name: selectedArtist ? selectedArtist.name : editingSong.artist_name,
-        album_id: formData.album_id || "",
-        album_name: selectedAlbum ? selectedAlbum.title : "Single",
-      };
-      await songsApi.update(editingSong.id, updates);
-      setSongs((prev) =>
-        prev.map((s) => (s.id === editingSong.id ? { ...s, ...updates } : s))
-      );
-      toast.success("Song updated in Supabase");
+  const handlePlayToggle = (song: Song) => {
+    if (!song.audio_url) return;
+    if (playingSongId === song.id) {
+      setPlayingSongId(null);
+      setPreviewAudioUrl(null);
     } else {
-      const newSongData = {
-        title: formData.title,
-        artist_id: formData.artist_id,
-        artist_name: selectedArtist ? selectedArtist.name : "Unknown Artist",
-        album_id: formData.album_id || "",
-        album_name: selectedAlbum ? selectedAlbum.title : "Single",
-        cover_url: finalCoverUrl,
-        audio_url: finalAudioUrl,
-        duration: formData.duration,
-        language: formData.language,
-      };
-      const created = await songsApi.create(newSongData);
-      setSongs((prev) => [created, ...prev]);
-      toast.success("Song saved to Supabase");
+      setPlayingSongId(song.id);
+      setPreviewAudioUrl({
+        url: song.audio_url,
+        title: song.title,
+        artist: song.artist_name || "Unknown Artist",
+      });
     }
-
-    setIsModalOpen(false);
   };
 
-  const columns: ColumnDef<Song, unknown>[] = [
+  const columns = [
     {
+      header: "Track",
       accessorKey: "title",
-      header: "Song Title",
-      cell: ({ row }) => {
-        const song = row.original;
-        const isPlaying = playingSongId === song.id;
+      cell: (props: any) => {
+        const row: Song = props.row.original;
+        const isPlaying = playingSongId === row.id;
         return (
           <div className="flex items-center gap-3">
-            <div className="relative group flex-shrink-0">
-              <img
-                src={song.cover_url}
-                alt={song.title}
-                className="w-10 h-10 rounded-lg object-cover border border-white/10"
-              />
-              <button
-                onClick={() => {
-                  if (isPlaying) {
-                    setPlayingSongId(null);
-                  } else {
-                    setPlayingSongId(song.id);
-                    setPreviewMedia({ type: "audio", url: song.audio_url, title: song.title });
-                  }
-                }}
-                className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center rounded-lg transition"
-              >
-                {isPlaying ? <Pause size={14} className="text-white fill-white" /> : <Play size={14} className="text-white fill-white" />}
-              </button>
+            <div className="relative w-11 h-11 rounded-lg bg-surface-2 overflow-hidden flex-shrink-0 group">
+              <img src={row.cover_url} alt={row.title} className="w-full h-full object-cover" />
+              {row.audio_url && (
+                <button
+                  onClick={() => handlePlayToggle(row)}
+                  className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white"
+                >
+                  {isPlaying ? <Pause size={18} fill="white" /> : <Play size={18} fill="white" className="ml-0.5" />}
+                </button>
+              )}
             </div>
-            <div>
-              <p className="font-semibold text-foreground">{song.title}</p>
-              <button
-                onClick={() => setPreviewMedia({ type: "cover", url: song.cover_url, title: song.title })}
-                className="text-[11px] text-purple-400 hover:underline flex items-center gap-1 mt-0.5"
-              >
-                <Eye size={10} /> Preview Cover
-              </button>
+            <div className="min-w-0">
+              <div className="font-bold text-foreground text-sm truncate">{row.title}</div>
+              <div className="text-xs text-muted-foreground truncate">{row.artist_name}</div>
             </div>
           </div>
         );
       },
     },
     {
-      accessorKey: "artist_name",
-      header: "Artist",
-      cell: ({ row }) => (
-        <span className="text-sm font-medium text-foreground/90">{row.original.artist_name || "Unknown"}</span>
-      ),
-    },
-    {
-      accessorKey: "album_name",
       header: "Album",
-      cell: ({ row }) => (
-        <span className="text-sm text-muted-foreground">{row.original.album_name || "Single"}</span>
-      ),
-    },
-    {
-      accessorKey: "language",
-      header: "Language",
-      cell: ({ row }) => (
-        <span className="text-xs font-semibold px-2.5 py-1 bg-purple-600/15 text-purple-300 rounded-lg inline-flex items-center gap-1">
-          <Globe size={11} /> {row.original.language || "Hindi"}
-        </span>
-      ),
-    },
-    {
-      accessorKey: "duration",
-      header: "Duration",
-      cell: ({ row }) => (
-        <span className="text-xs font-mono text-muted-foreground">{formatDuration(row.original.duration)}</span>
-      ),
-    },
-    {
-      id: "actions",
-      header: "",
-      cell: ({ row }) => {
-        const song = row.original;
+      accessorKey: "album_name",
+      cell: (props: any) => {
+        const row: Song = props.row.original;
         return (
-          <div className="flex items-center justify-end gap-1">
-            <button
-              onClick={() => handleOpenEdit(song)}
-              className="p-2 text-muted-foreground hover:text-purple-400 hover:bg-white/5 rounded-lg transition"
-              title="Edit song"
-            >
-              <Edit2 size={15} />
-            </button>
-            <button
-              onClick={() => setDeleteTarget(song)}
-              className="p-2 text-muted-foreground hover:text-red-400 hover:bg-white/5 rounded-lg transition"
-              title="Delete song"
-            >
-              <Trash2 size={15} />
-            </button>
+          <span className="text-xs font-medium text-muted-foreground truncate max-w-[150px] inline-block">
+            {row.album_name || "Single"}
+          </span>
+        );
+      },
+    },
+    {
+      header: "Language",
+      accessorKey: "language",
+      cell: (props: any) => {
+        const row: Song = props.row.original;
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-purple-500/10 text-purple-400 border border-purple-500/20">
+            <Globe size={12} />
+            {row.language || "Hindi"}
+          </span>
+        );
+      },
+    },
+    {
+      header: "Duration",
+      accessorKey: "duration",
+      cell: (props: any) => {
+        const row: Song = props.row.original;
+        return <span className="text-xs font-mono text-muted-foreground">{formatDuration(row.duration)}</span>;
+      },
+    },
+    {
+      header: "Audio Preview",
+      accessorKey: "audio_url",
+      cell: (props: any) => {
+        const row: Song = props.row.original;
+        const isPlaying = playingSongId === row.id;
+        return (
+          <div>
+            {row.audio_url ? (
+              <button
+                onClick={() => handlePlayToggle(row)}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                  isPlaying
+                    ? "bg-purple-600 text-white shadow-glow-purple-sm"
+                    : "bg-surface-3 hover:bg-surface-4 text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {isPlaying ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" />}
+                {isPlaying ? "Playing..." : "Preview"}
+              </button>
+            ) : (
+              <span className="text-xs text-muted-foreground italic">No Audio</span>
+            )}
           </div>
         );
       },
@@ -276,223 +149,68 @@ export default function SongsPage() {
   return (
     <PageWrapper>
       <PageHeader
-        title="Songs Module"
-        description="Manage master audio tracks, languages, and previews in Supabase."
-        actions={
-          <div className="flex gap-2">
-            <button
-              onClick={() => navigate("/songs/bulk-upload")}
-              className="flex items-center gap-2 px-4 py-2.5 bg-surface-2 hover:bg-white/10 text-foreground rounded-xl font-semibold text-sm transition border border-white/5"
-            >
-              Bulk Upload
-            </button>
-            <button
-              onClick={handleOpenCreate}
-              className="flex items-center gap-2 px-4 py-2.5 bg-purple-gradient text-white rounded-xl font-semibold text-sm shadow-glow-purple-sm hover:shadow-glow-purple transition"
-            >
-              <Plus size={16} />
-              Add Song
-            </button>
-          </div>
-        }
+        title="Songs Library"
+        description="Explore live Punjabi, Hindi, and global music catalog via JioSaavn API."
       />
 
-      {previewMedia?.type === "audio" && (
-        <div className="glass-card p-4 flex items-center justify-between bg-purple-600/10 border-purple-600/30">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-purple-600 flex items-center justify-center">
-              <Music size={16} className="text-white" />
-            </div>
-            <div>
-              <p className="text-xs font-bold text-white">Previewing Audio: {previewMedia.title}</p>
-              <audio controls autoPlay src={previewMedia.url} className="h-7 mt-1 w-64 sm:w-80" />
-            </div>
-          </div>
-          <button onClick={() => { setPreviewMedia(null); setPlayingSongId(null); }} className="text-xs text-muted-foreground hover:text-foreground">Close Player</button>
+      {/* Filter Bar */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 mb-6">
+        <div className="flex items-center gap-3 flex-1">
+          <SearchInput
+            value={search}
+            onChange={setSearch}
+            placeholder="Search any track or artist (e.g. Sidhu Moose Wala, Karan Aujla, Kesariya)..."
+            className="w-full max-w-md"
+          />
         </div>
-      )}
 
-      <div className="glass-card p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
-        <SearchInput
-          value={search}
-          onChange={setSearch}
-          placeholder="Search song title, artist, album, language..."
-          className="w-full sm:w-80"
-        />
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          <label className="text-xs text-muted-foreground font-medium">Language:</label>
+        <div className="flex items-center gap-3">
           <select
             value={languageFilter}
             onChange={(e) => setLanguageFilter(e.target.value)}
-            className="bg-surface-3 border border-white/8 rounded-xl px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-purple-600/40"
+            className="px-4 py-2 bg-surface-2 border border-white/10 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-purple-600/50 text-foreground transition"
           >
-            <option value="all">All Languages</option>
+            <option value="all">All Languages (250+ Tracks)</option>
             {LANGUAGES.map((lang) => (
               <option key={lang} value={lang}>
                 {lang}
               </option>
             ))}
           </select>
+
+          <div className="text-xs font-semibold text-muted-foreground px-3 py-2 bg-surface-2 rounded-xl border border-white/5">
+            Showing <span className="text-foreground font-bold">{filteredSongs.length}</span> tracks
+          </div>
         </div>
       </div>
 
-      <div className="glass-card p-4">
-        {loading ? <TableSkeleton rows={5} /> : <DataTable data={filteredSongs} columns={columns} />}
-      </div>
-
-      <Modal
-        open={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        title={editingSong ? "Edit Song" : "Create Song"}
-        size="lg"
-      >
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <FileUploadZone accept="image" value={coverFile} onChange={setCoverFile} label="Cover Artwork" />
-            <FileUploadZone accept="audio" value={audioFile} onChange={(file) => {
-              setAudioFile(file);
-              if (file && !formData.title) {
-                setFormData((prev) => ({ ...prev, title: file.name.replace(/\.[^/.]+$/, "") }));
-              }
-            }} label="Audio File" />
+      {/* Floating Audio Player */}
+      {previewAudioUrl && (
+        <div className="fixed bottom-6 right-6 z-50 glass-card p-4 rounded-2xl border border-purple-500/30 shadow-2xl flex items-center gap-4 animate-in slide-in-from-bottom-5">
+          <div className="w-10 h-10 rounded-xl bg-purple-600 flex items-center justify-center text-white shadow-glow-purple-sm">
+            <Volume2 size={20} className="animate-pulse" />
           </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground">Cover URL</label>
-              <input
-                type="url"
-                value={formData.cover_url}
-                onChange={(e) => setFormData({ ...formData, cover_url: e.target.value })}
-                placeholder="https://..."
-                className="w-full px-3.5 py-2.5 bg-surface-3 border border-white/8 rounded-xl text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-purple-600/40"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground">Audio URL</label>
-              <input
-                type="url"
-                value={formData.audio_url}
-                onChange={(e) => setFormData({ ...formData, audio_url: e.target.value })}
-                placeholder="https://...mp3"
-                className="w-full px-3.5 py-2.5 bg-surface-3 border border-white/8 rounded-xl text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-purple-600/40"
-              />
-            </div>
+          <div>
+            <p className="text-xs font-bold text-foreground truncate max-w-[200px]">{previewAudioUrl.title}</p>
+            <p className="text-[11px] text-muted-foreground truncate max-w-[200px]">{previewAudioUrl.artist}</p>
           </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground">Song Title *</label>
-              <input
-                type="text"
-                value={formData.title}
-                onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                placeholder="e.g. Chaleya"
-                className="w-full px-3.5 py-2.5 bg-surface-3 border border-white/8 rounded-xl text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-purple-600/40"
-                required
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground">Song Language Tag *</label>
-              <select
-                value={formData.language}
-                onChange={(e) => setFormData({ ...formData, language: e.target.value })}
-                className="w-full px-3.5 py-2.5 bg-surface-3 border border-white/8 rounded-xl text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-purple-600/40 font-semibold text-purple-300"
-              >
-                {LANGUAGES.map((lang) => (
-                  <option key={lang} value={lang}>
-                    🌐 {lang}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground">Artist *</label>
-              <select
-                value={formData.artist_id}
-                onChange={(e) => {
-                  const newArtistId = e.target.value;
-                  setFormData({
-                    ...formData,
-                    artist_id: newArtistId,
-                    // Keep album_id as "" (Single) when switching artist unless explicitly selected
-                  });
-                }}
-                className="w-full px-3.5 py-2.5 bg-surface-3 border border-white/8 rounded-xl text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-purple-600/40"
-              >
-                {artists.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground">Album (Optional)</label>
-              <select
-                value={formData.album_id}
-                onChange={(e) => setFormData({ ...formData, album_id: e.target.value })}
-                className="w-full px-3.5 py-2.5 bg-surface-3 border border-white/8 rounded-xl text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-purple-600/40"
-              >
-                <option value="">None (Single Track)</option>
-                {availableAlbums.map((al) => (
-                  <option key={al.id} value={al.id}>
-                    {al.title}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground">Duration (seconds)</label>
-              <input
-                type="number"
-                value={formData.duration}
-                onChange={(e) => setFormData({ ...formData, duration: Number(e.target.value) })}
-                placeholder="200"
-                className="w-full px-3.5 py-2.5 bg-surface-3 border border-white/8 rounded-xl text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-purple-600/40"
-              />
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-3 pt-4 border-t border-white/8">
-            <button
-              type="button"
-              onClick={() => setIsModalOpen(false)}
-              className="px-4 py-2 bg-white/5 hover:bg-white/10 text-foreground rounded-xl text-sm font-medium transition"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-5 py-2 bg-purple-gradient text-white rounded-xl text-sm font-semibold shadow-glow-purple-sm hover:shadow-glow-purple transition"
-            >
-              {editingSong ? "Save Changes" : "Create Song"}
-            </button>
-          </div>
-        </form>
-      </Modal>
-
-      {previewMedia?.type === "cover" && (
-        <Modal open={true} onClose={() => setPreviewMedia(null)} title={`Cover Preview: ${previewMedia.title}`} size="md">
-          <div className="flex justify-center p-2">
-            <img src={previewMedia.url} alt="Cover" className="max-h-80 rounded-xl object-cover border border-white/10" />
-          </div>
-        </Modal>
+          <audio src={previewAudioUrl.url} autoPlay controls className="h-8 max-w-[220px]" onEnded={() => setPlayingSongId(null)} />
+          <button
+            onClick={() => {
+              setPlayingSongId(null);
+              setPreviewAudioUrl(null);
+            }}
+            className="text-xs text-muted-foreground hover:text-foreground ml-2"
+          >
+            ✕
+          </button>
+        </div>
       )}
 
-      <ConfirmationDialog
-        open={Boolean(deleteTarget)}
-        onClose={() => setDeleteTarget(null)}
-        onConfirm={confirmDelete}
-        title={`Delete Song "${deleteTarget?.title}"?`}
-        description="This song will be removed from playlists and deleted from Supabase."
-      />
+      {/* Main Table */}
+      <div className="glass-card rounded-2xl overflow-hidden border border-white/5 shadow-glass">
+        {loading ? <TableSkeleton rows={8} /> : <DataTable columns={columns} data={filteredSongs} />}
+      </div>
     </PageWrapper>
   );
 }

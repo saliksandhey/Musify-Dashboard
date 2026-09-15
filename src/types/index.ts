@@ -14,6 +14,7 @@ export interface Artist {
   image_url: string;
   verified: boolean;
   monthly_listeners: number;
+  role?: string;
   created_at?: string;
 }
 
@@ -24,6 +25,7 @@ export interface Album {
   artist_name?: string;
   cover_url: string;
   release_year: number;
+  song_count?: number;
   created_at?: string;
 }
 
@@ -53,7 +55,7 @@ export interface Playlist {
 export interface PlaylistSong {
   id?: string;
   playlist_id: string;
-  song_id: string;
+  song_id: string; // JioSaavn string ID
 }
 
 export interface HeroBanner {

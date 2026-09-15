@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { type ColumnDef } from "@tanstack/react-table";
-import { Plus, ListMusic, Edit2, Trash2, Music, Check } from "lucide-react";
+import { Plus, ListMusic, Edit2, Trash2, Music, Check, Search, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import PageWrapper, { PageHeader } from "@/components/ui/PageWrapper";
 import DataTable from "@/components/ui/DataTable";
@@ -17,6 +17,8 @@ export default function PlaylistsPage() {
   const [songs, setSongs] = useState<Song[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [songSearchQuery, setSongSearchQuery] = useState("");
+  const [loadingSongs, setLoadingSongs] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingPlaylist, setEditingPlaylist] = useState<Playlist | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Playlist | null>(null);
@@ -33,15 +35,39 @@ export default function PlaylistsPage() {
     loadData();
   }, []);
 
+  // Debounced search for songs in playlist modal
+  useEffect(() => {
+    if (!isModalOpen) return;
+    const timer = setTimeout(() => {
+      const q = songSearchQuery.trim() || "trending";
+      loadModalSongs(q);
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [songSearchQuery, isModalOpen]);
+
   const loadData = async () => {
     setLoading(true);
     const [playlistsData, songsData] = await Promise.all([
       playlistsApi.getAll(),
-      songsApi.getAll(),
+      songsApi.search("trending"),
     ]);
     setPlaylists(playlistsData);
     setSongs(songsData);
     setLoading(false);
+  };
+
+  const loadModalSongs = async (q: string) => {
+    setLoadingSongs(true);
+    const data = await songsApi.search(q);
+    // Keep currently selected songs in the list so they don't vanish when searching
+    setSongs((prev) => {
+      const map = new Map<string, Song>();
+      prev.forEach((s) => map.set(s.id, s));
+      data.forEach((s) => map.set(s.id, s));
+      return Array.from(map.values());
+    });
+    setLoadingSongs(false);
   };
 
   const filteredPlaylists = useMemo(() => {
@@ -61,6 +87,7 @@ export default function PlaylistsPage() {
     });
     setSelectedSongIds([]);
     setCoverFile(null);
+    setSongSearchQuery("");
     setIsModalOpen(true);
   };
 
@@ -72,6 +99,7 @@ export default function PlaylistsPage() {
       cover_url: pl.cover_url,
     });
     setCoverFile(null);
+    setSongSearchQuery("");
     setIsModalOpen(true);
 
     // Load junction playlist_songs for this playlist
@@ -100,7 +128,7 @@ export default function PlaylistsPage() {
       return;
     }
 
-    let finalCoverUrl = formData.cover_url || editingPlaylist?.cover_url || "https://picsum.photos/200";
+    let finalCoverUrl = formData.cover_url || editingPlaylist?.cover_url || "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?q=80&w=600&h=600";
     if (coverFile) {
       finalCoverUrl = await storageApi.uploadFile("covers", coverFile);
     }
@@ -183,7 +211,7 @@ export default function PlaylistsPage() {
     <PageWrapper>
       <PageHeader
         title="Playlists Module"
-        description="Manage playlists and store song linkages in playlist_songs junction table."
+        description="Manage playlists in Supabase with JioSaavn track linkages."
         actions={
           <button
             onClick={handleOpenCreate}
@@ -256,32 +284,48 @@ export default function PlaylistsPage() {
           <div className="space-y-2 pt-2">
             <div className="flex items-center justify-between">
               <label className="text-xs font-bold text-foreground">Select Songs to Include ({selectedSongIds.length} selected)</label>
-              <span className="text-[11px] text-purple-400">Stores relationship in playlist_songs</span>
+              <span className="text-[11px] text-purple-400">Stores JioSaavn string IDs in playlist_songs</span>
             </div>
+
+            <SearchInput
+              value={songSearchQuery}
+              onChange={setSongSearchQuery}
+              placeholder="Search JioSaavn songs to add (e.g. Kesariya, Chaleya)..."
+              className="w-full"
+            />
+
             <div className="max-h-56 overflow-y-auto space-y-1.5 p-2 bg-surface-3 rounded-xl border border-white/8">
-              {songs.map((song) => {
-                const isSelected = selectedSongIds.includes(song.id);
-                return (
-                  <div
-                    key={song.id}
-                    onClick={() => toggleSongSelection(song.id)}
-                    className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition ${
-                      isSelected ? "bg-purple-600/20 border border-purple-600/40" : "hover:bg-white/5 border border-transparent"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <div className={`w-4 h-4 rounded flex items-center justify-center border text-white ${isSelected ? "bg-purple-600 border-purple-600" : "border-white/20"}`}>
-                        {isSelected && <Check size={12} />}
-                      </div>
-                      <img src={song.cover_url} alt={song.title} className="w-8 h-8 rounded object-cover" />
-                      <div>
-                        <p className="text-xs font-semibold text-foreground">{song.title}</p>
-                        <p className="text-[10px] text-muted-foreground">{song.artist_name}</p>
+              {loadingSongs ? (
+                <div className="flex items-center justify-center p-4">
+                  <Loader2 className="animate-spin text-purple-500" size={20} />
+                </div>
+              ) : songs.length === 0 ? (
+                <p className="text-xs text-muted-foreground text-center p-4">No songs found.</p>
+              ) : (
+                songs.map((song) => {
+                  const isSelected = selectedSongIds.includes(song.id);
+                  return (
+                    <div
+                      key={song.id}
+                      onClick={() => toggleSongSelection(song.id)}
+                      className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition ${
+                        isSelected ? "bg-purple-600/20 border border-purple-600/40" : "hover:bg-white/5 border border-transparent"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className={`w-4 h-4 rounded flex items-center justify-center border text-white flex-shrink-0 ${isSelected ? "bg-purple-600 border-purple-600" : "border-white/20"}`}>
+                          {isSelected && <Check size={12} />}
+                        </div>
+                        <img src={song.cover_url} alt={song.title} className="w-8 h-8 rounded object-cover flex-shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-foreground truncate">{song.title}</p>
+                          <p className="text-[10px] text-muted-foreground truncate">{song.artist_name}</p>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
             </div>
           </div>
 

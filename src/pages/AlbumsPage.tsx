@@ -1,193 +1,71 @@
 import { useState, useMemo, useEffect } from "react";
-import { type ColumnDef } from "@tanstack/react-table";
-import { Plus, Disc3, Edit2, Trash2 } from "lucide-react";
-import { toast } from "sonner";
+import { Disc3, Calendar, Search } from "lucide-react";
 import PageWrapper, { PageHeader } from "@/components/ui/PageWrapper";
 import DataTable from "@/components/ui/DataTable";
 import SearchInput from "@/components/ui/SearchInput";
-import Modal from "@/components/ui/Modal";
-import FileUploadZone from "@/components/ui/FileUploadZone";
-import ConfirmationDialog from "@/components/ui/ConfirmationDialog";
 import { TableSkeleton } from "@/components/ui/Skeleton";
-import { albumsApi, artistsApi, storageApi } from "@/services/apiServices";
-import type { Album, Artist } from "@/types";
+import { albumsApi } from "@/services/apiServices";
+import type { Album } from "@/types";
 
 export default function AlbumsPage() {
   const [albums, setAlbums] = useState<Album[]>([]);
-  const [artists, setArtists] = useState<Artist[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingAlbum, setEditingAlbum] = useState<Album | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<Album | null>(null);
 
-  const [formData, setFormData] = useState({
-    title: "",
-    artist_id: "",
-    cover_url: "",
-    release_year: 2024,
-  });
-  const [coverFile, setCoverFile] = useState<File | null>(null);
-
+  // Debounced live search
   useEffect(() => {
-    loadData();
-  }, []);
+    const timer = setTimeout(() => {
+      const q = search.trim() || "trending";
+      loadAlbums(q);
+    }, 400);
 
-  const loadData = async () => {
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  const loadAlbums = async (query: string) => {
     setLoading(true);
-    const [albumsData, artistsData] = await Promise.all([
-      albumsApi.getAll(),
-      artistsApi.getAll(),
-    ]);
-    setAlbums(albumsData);
-    setArtists(artistsData);
-    if (artistsData.length > 0) {
-      setFormData((prev) => ({ ...prev, artist_id: artistsData[0].id }));
-    }
+    const data = await albumsApi.search(query);
+    setAlbums(data);
     setLoading(false);
   };
 
-  const filteredAlbums = useMemo(() => {
-    return albums.filter((a) => {
-      const matchesSearch =
-        a.title.toLowerCase().includes(search.toLowerCase()) ||
-        (a.artist_name && a.artist_name.toLowerCase().includes(search.toLowerCase()));
-      return matchesSearch;
-    });
-  }, [albums, search]);
-
-  const handleOpenCreate = () => {
-    setEditingAlbum(null);
-    setFormData({
-      title: "",
-      artist_id: artists[0]?.id || "",
-      cover_url: "",
-      release_year: new Date().getFullYear(),
-    });
-    setCoverFile(null);
-    setIsModalOpen(true);
-  };
-
-  const handleOpenEdit = (album: Album) => {
-    setEditingAlbum(album);
-    setFormData({
-      title: album.title,
-      artist_id: album.artist_id,
-      cover_url: album.cover_url,
-      release_year: album.release_year,
-    });
-    setCoverFile(null);
-    setIsModalOpen(true);
-  };
-
-  const confirmDelete = async () => {
-    if (!deleteTarget) return;
-    await albumsApi.delete(deleteTarget.id);
-    setAlbums((prev) => prev.filter((a) => a.id !== deleteTarget.id));
-    toast.success("Album and related songs deleted");
-    setDeleteTarget(null);
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formData.title) {
-      toast.error("Please enter an album title");
-      return;
-    }
-
-    let finalCoverUrl = formData.cover_url || editingAlbum?.cover_url || "https://picsum.photos/200";
-    if (coverFile) {
-      finalCoverUrl = await storageApi.uploadFile("covers", coverFile);
-    }
-
-    const selectedArtist = artists.find((a) => a.id === formData.artist_id);
-
-    if (editingAlbum) {
-      const updates = {
-        ...formData,
-        cover_url: finalCoverUrl,
-        artist_name: selectedArtist ? selectedArtist.name : editingAlbum.artist_name,
-      };
-      await albumsApi.update(editingAlbum.id, updates);
-      setAlbums((prev) =>
-        prev.map((a) => (a.id === editingAlbum.id ? { ...a, ...updates } : a))
-      );
-      toast.success("Album updated");
-    } else {
-      const newAlbumData = {
-        title: formData.title,
-        artist_id: formData.artist_id,
-        artist_name: selectedArtist ? selectedArtist.name : "Unknown Artist",
-        cover_url: finalCoverUrl,
-        release_year: formData.release_year,
-      };
-      const created = await albumsApi.create(newAlbumData);
-      setAlbums((prev) => [created, ...prev]);
-      toast.success("Album created");
-    }
-
-    setIsModalOpen(false);
-  };
-
-  const columns: ColumnDef<Album, unknown>[] = [
+  const columns = [
     {
-      accessorKey: "title",
       header: "Album",
-      cell: ({ row }) => {
-        const album = row.original;
+      accessorKey: "title",
+      cell: (props: any) => {
+        const row: Album = props.row.original;
         return (
           <div className="flex items-center gap-3">
-            <img
-              src={album.cover_url}
-              alt={album.title}
-              className="w-10 h-10 rounded-lg object-cover border border-white/10"
-            />
+            <div className="w-12 h-12 rounded-xl bg-surface-2 overflow-hidden flex-shrink-0 border border-white/10">
+              <img src={row.cover_url} alt={row.title} className="w-full h-full object-cover" />
+            </div>
             <div>
-              <p className="font-semibold text-foreground">{album.title}</p>
-              <p className="text-xs text-muted-foreground">{album.release_year}</p>
+              <div className="font-bold text-foreground text-sm truncate max-w-[250px]">{row.title}</div>
+              <div className="text-xs text-muted-foreground truncate max-w-[250px]">{row.artist_name}</div>
             </div>
           </div>
         );
       },
     },
     {
-      accessorKey: "artist_name",
       header: "Artist",
-      cell: ({ row }) => (
-        <span className="text-sm font-medium text-foreground/90">{row.original.artist_name || "Unknown"}</span>
-      ),
+      accessorKey: "artist_name",
+      cell: (props: any) => {
+        const row: Album = props.row.original;
+        return <span className="text-xs font-medium text-foreground">{row.artist_name || "Various Artists"}</span>;
+      },
     },
     {
-      accessorKey: "release_year",
       header: "Release Year",
-      cell: ({ row }) => (
-        <span className="text-xs font-semibold px-2 py-1 bg-white/5 text-purple-300 rounded-lg">
-          {row.original.release_year}
-        </span>
-      ),
-    },
-    {
-      id: "actions",
-      header: "",
-      cell: ({ row }) => {
-        const album = row.original;
+      accessorKey: "release_year",
+      cell: (props: any) => {
+        const row: Album = props.row.original;
         return (
-          <div className="flex items-center justify-end gap-1">
-            <button
-              onClick={() => handleOpenEdit(album)}
-              className="p-2 text-muted-foreground hover:text-purple-400 hover:bg-white/5 rounded-lg transition"
-              title="Edit album"
-            >
-              <Edit2 size={15} />
-            </button>
-            <button
-              onClick={() => setDeleteTarget(album)}
-              className="p-2 text-muted-foreground hover:text-red-400 hover:bg-white/5 rounded-lg transition"
-              title="Delete album"
-            >
-              <Trash2 size={15} />
-            </button>
-          </div>
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-surface-3 text-foreground border border-white/5">
+            <Calendar size={12} className="text-muted-foreground" />
+            {row.release_year || "2024"}
+          </span>
         );
       },
     },
@@ -196,122 +74,28 @@ export default function AlbumsPage() {
   return (
     <PageWrapper>
       <PageHeader
-        title="Albums Module"
-        description="Manage discography releases linked with artists."
-        actions={
-          <button
-            onClick={handleOpenCreate}
-            className="flex items-center gap-2 px-4 py-2.5 bg-purple-gradient text-white rounded-xl font-semibold text-sm shadow-glow-purple-sm hover:shadow-glow-purple transition"
-          >
-            <Plus size={16} />
-            Add Album
-          </button>
-        }
+        title="Albums Catalog"
+        description="Search and explore music albums globally via JioSaavn API."
       />
 
-      <div className="glass-card p-4 flex items-center justify-between">
+      {/* Filter / Search Bar */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 mb-6">
         <SearchInput
           value={search}
           onChange={setSearch}
-          placeholder="Search album title or artist..."
-          className="w-full sm:w-80"
+          placeholder="Search albums globally (e.g. Animal, Rockstar, Kabir Singh)..."
+          className="w-full max-w-md"
         />
+
+        <div className="text-xs font-semibold text-muted-foreground px-3 py-2 bg-surface-2 rounded-xl border border-white/5 self-start sm:self-auto">
+          Found <span className="text-foreground font-bold">{albums.length}</span> albums
+        </div>
       </div>
 
-      <div className="glass-card p-4">
-        {loading ? <TableSkeleton rows={5} /> : <DataTable data={filteredAlbums} columns={columns} />}
+      {/* Main Table */}
+      <div className="glass-card rounded-2xl overflow-hidden border border-white/5 shadow-glass">
+        {loading ? <TableSkeleton rows={6} /> : <DataTable columns={columns} data={albums} />}
       </div>
-
-      <Modal
-        open={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        title={editingAlbum ? "Edit Album" : "Create Album"}
-        size="md"
-      >
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <FileUploadZone
-            accept="image"
-            value={coverFile}
-            onChange={setCoverFile}
-            label="Upload Cover Artwork (or paste Cover URL below)"
-          />
-
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Cover URL</label>
-            <input
-              type="url"
-              value={formData.cover_url}
-              onChange={(e) => setFormData({ ...formData, cover_url: e.target.value })}
-              placeholder="https://images.unsplash.com/..."
-              className="w-full px-3.5 py-2.5 bg-surface-3 border border-white/8 rounded-xl text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-purple-600/40"
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Album Title *</label>
-            <input
-              type="text"
-              value={formData.title}
-              onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-              placeholder="e.g. Midnight Echoes"
-              className="w-full px-3.5 py-2.5 bg-surface-3 border border-white/8 rounded-xl text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-purple-600/40"
-              required
-            />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground">Artist *</label>
-              <select
-                value={formData.artist_id}
-                onChange={(e) => setFormData({ ...formData, artist_id: e.target.value })}
-                className="w-full px-3.5 py-2.5 bg-surface-3 border border-white/8 rounded-xl text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-purple-600/40"
-              >
-                {artists.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground">Release Year</label>
-              <input
-                type="number"
-                value={formData.release_year}
-                onChange={(e) => setFormData({ ...formData, release_year: Number(e.target.value) })}
-                placeholder="2024"
-                className="w-full px-3.5 py-2.5 bg-surface-3 border border-white/8 rounded-xl text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-purple-600/40"
-              />
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-3 pt-4 border-t border-white/8">
-            <button
-              type="button"
-              onClick={() => setIsModalOpen(false)}
-              className="px-4 py-2 bg-white/5 hover:bg-white/10 text-foreground rounded-xl text-sm font-medium transition"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-5 py-2 bg-purple-gradient text-white rounded-xl text-sm font-semibold shadow-glow-purple-sm hover:shadow-glow-purple transition"
-            >
-              {editingAlbum ? "Save Changes" : "Create Album"}
-            </button>
-          </div>
-        </form>
-      </Modal>
-
-      <ConfirmationDialog
-        open={Boolean(deleteTarget)}
-        onClose={() => setDeleteTarget(null)}
-        onConfirm={confirmDelete}
-        title={`Delete Album "${deleteTarget?.title}"?`}
-        description="This will remove the album record and any dependent songs."
-      />
     </PageWrapper>
   );
 }

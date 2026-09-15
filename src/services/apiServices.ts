@@ -1,7 +1,120 @@
 import { supabase, supabaseAdmin } from "./supabase";
-import { mockArtists, mockAlbums, mockSongs, mockPlaylists, mockUsers } from "@/constants/mockData";
 import type { Artist, Album, Song, Playlist, User, HeroBanner } from "@/types";
 import { toast } from "sonner";
+
+// Active JioSaavn API mirrors (with multi-mirror automatic fallback)
+const SAAVN_BASE_URLS = [
+  "https://jiosaavn-api-2.vercel.app",
+  "https://saavn.me",
+  "https://jiosaavn-api.vercel.app",
+];
+
+async function fetchJioSaavn(endpointPath: string): Promise<any> {
+  for (const baseUrl of SAAVN_BASE_URLS) {
+    try {
+      const res = await fetch(`${baseUrl}${endpointPath}`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json && (json.status === "SUCCESS" || json.data || json.results)) {
+          return json;
+        }
+      }
+    } catch (e) {
+      console.warn(`JioSaavn mirror '${baseUrl}' failed, trying fallback...`);
+    }
+  }
+  return null;
+}
+
+// ─── JIOSAAVN HELPER FUNCTIONS ────────────────────────────────────────────────
+function cleanText(str: string): string {
+  if (!str) return "";
+  return str
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&')
+    .replace(/&#039;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
+}
+
+function extractImageUrl(image: any): string {
+  if (Array.isArray(image)) {
+    const best = image[image.length - 1] || image[0];
+    return best?.link || best?.url || "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?q=80&w=600&h=600";
+  }
+  if (typeof image === "string" && image.trim().length > 0) return image;
+  return "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?q=80&w=600&h=600";
+}
+
+function extractAudioUrl(downloadUrl: any): string {
+  if (Array.isArray(downloadUrl)) {
+    const best = downloadUrl[downloadUrl.length - 1] || downloadUrl[0];
+    return best?.link || best?.url || "";
+  }
+  if (typeof downloadUrl === "string") return downloadUrl;
+  return "";
+}
+
+function extractArtistName(item: any): string {
+  if (typeof item.primaryArtists === "string" && item.primaryArtists.trim().length > 0) {
+    return cleanText(item.primaryArtists);
+  }
+  if (Array.isArray(item.artists?.primary) && item.artists.primary.length > 0) {
+    return cleanText(item.artists.primary.map((a: any) => a.name).join(", "));
+  }
+  if (typeof item.artist === "string" && item.artist.trim().length > 0) {
+    return cleanText(item.artist);
+  }
+  return "Various Artists";
+}
+
+function extractArtistId(item: any): string {
+  if (Array.isArray(item.artists?.primary) && item.artists.primary.length > 0) {
+    return String(item.artists.primary[0].id || "");
+  }
+  return String(item.artistId || item.primaryArtistsId || "");
+}
+
+function mapJioSaavnSong(item: any): Song {
+  return {
+    id: String(item.id),
+    title: cleanText(item.name || item.title || "Untitled Song"),
+    artist_id: extractArtistId(item),
+    artist_name: extractArtistName(item),
+    album_id: String(item.album?.id || item.albumId || ""),
+    album_name: cleanText(item.album?.name || item.album || "Single"),
+    cover_url: extractImageUrl(item.image),
+    audio_url: extractAudioUrl(item.downloadUrl),
+    duration: Number(item.duration ?? 180),
+    language: item.language ? (item.language.charAt(0).toUpperCase() + item.language.slice(1).toLowerCase()) : "Hindi",
+    created_at: item.releaseDate || new Date().toISOString(),
+  };
+}
+
+function mapJioSaavnArtist(item: any): Artist {
+  return {
+    id: String(item.id),
+    name: cleanText(item.name || item.title || "Unknown Artist"),
+    image_url: extractImageUrl(item.image),
+    verified: true,
+    monthly_listeners: Number(item.followerCount || item.playCount || 150000),
+    role: item.role || item.type || "Artist",
+    created_at: new Date().toISOString(),
+  };
+}
+
+function mapJioSaavnAlbum(item: any): Album {
+  return {
+    id: String(item.id),
+    title: cleanText(item.name || item.title || "Untitled Album"),
+    artist_id: extractArtistId(item),
+    artist_name: extractArtistName(item),
+    cover_url: extractImageUrl(item.image),
+    release_year: Number(item.year || 2024),
+    song_count: Number(item.songCount || 10),
+    created_at: item.releaseDate || new Date().toISOString(),
+  };
+}
 
 // ─── PREMIUM EXPO PUSH NOTIFICATION SERVICE ──────────────────────────────────
 export async function sendExpoPushNotification({
@@ -16,22 +129,10 @@ export async function sendExpoPushNotification({
   data?: Record<string, any>;
 }) {
   try {
-    console.log("🔍 Fetching user push tokens from Supabase...");
-    // 1. Fetch all registered user push tokens from Supabase
-    const { data: tokenList, error } = await supabase
-      .from("user_push_tokens")
-      .select("push_token");
-
-    if (error) {
-      console.error("❌ Error fetching user push tokens from Supabase:", error.message);
-      toast.error(`Push Token Error: ${error.message}`);
-      return;
-    }
-
-    console.log(`📋 Found ${tokenList?.length || 0} token records in database:`, tokenList);
+    const { data: tokenList, error } = await supabase.from("user_push_tokens").select("push_token");
+    if (error) throw error;
 
     if (tokenList && tokenList.length > 0) {
-      // 2. Format Expo Push Notification payload (Support all ExpoPushToken / ExponentPushToken formats)
       const pushMessages = tokenList
         .filter((item) => item.push_token && typeof item.push_token === "string" && item.push_token.trim().length > 0)
         .map((item) => ({
@@ -46,62 +147,23 @@ export async function sendExpoPushNotification({
           data: data || {},
         }));
 
-      if (pushMessages.length === 0) {
-        console.warn("⚠️ No valid push tokens found to send.");
-        toast.warning("No valid device push tokens found in database.");
-        return;
+      if (pushMessages.length > 0) {
+        await fetch("https://exp.host/--/api/v2/push/send", {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(pushMessages),
+        });
       }
-
-      console.log("🚀 Sending push payload to Expo Server:", pushMessages);
-
-      // 3. Dispatch to Expo Push API
-      const response = await fetch("https://exp.host/--/api/v2/push/send", {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Accept-Encoding": "gzip, deflate",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(pushMessages),
-      });
-
-      const resData = await response.json();
-      console.log("📥 Expo Push API Response:", resData);
-
-      if (response.ok) {
-        toast.success(`📱 Push Notification sent to ${pushMessages.length} mobile device(s)!`);
-      } else {
-        toast.error(`Expo API Error: ${resData?.errors?.[0]?.message || "Failed to send"}`);
-      }
-    } else {
-      console.warn("⚠️ user_push_tokens table is empty in Supabase.");
-      toast.info("No mobile devices registered for push notifications yet.");
     }
   } catch (e: any) {
-    console.error("❌ Failed to send Expo push notification:", e);
-    toast.error(`Notification dispatch failed: ${e?.message || e}`);
+    console.error("Expo push notification failed:", e);
   }
 }
 
-// Helper: Fetch from Supabase. Return actual database rows (even if empty []).
-async function fetchFromSupabase<T>(table: string, fallbackMock: T[], transformer?: (row: any) => T): Promise<T[]> {
-  try {
-    const { data, error } = await supabase.from(table).select("*").order("created_at", { ascending: false });
-    if (error) {
-      console.warn(`Supabase query error on table '${table}':`, error.message);
-      return fallbackMock;
-    }
-    if (data !== null) {
-      return transformer ? data.map(transformer) : (data as T[]);
-    }
-    return [];
-  } catch (e) {
-    console.warn(`Supabase connection failed on table '${table}':`, e);
-    return fallbackMock;
-  }
-}
-
-// ─── USERS API ─────────────────────────────────────────────────────────────
+// ─── USERS API (SUPABASE AUTH ADMIN) ───────────────────────────────────────
 export const usersApi = {
   getAll: async (): Promise<User[]> => {
     try {
@@ -118,8 +180,8 @@ export const usersApi = {
         created_at: u.created_at,
       }));
     } catch (e) {
-      console.error("Failed to fetch users from auth.admin:", e);
-      return mockUsers;
+      console.warn("Failed to fetch users from Supabase auth.admin:", e);
+      return [];
     }
   },
   
@@ -131,6 +193,7 @@ export const usersApi = {
       if (error) throw error;
     } catch (e) {
       console.error("Supabase update role failed:", e);
+      toast.error("Failed to update role in Supabase");
     }
   },
 
@@ -142,6 +205,7 @@ export const usersApi = {
       if (error) throw error;
     } catch (e) {
       console.error("Supabase update status failed:", e);
+      toast.error("Failed to update status in Supabase");
     }
   },
 
@@ -151,259 +215,190 @@ export const usersApi = {
       if (error) throw error;
     } catch (e) {
       console.error("Supabase delete user failed:", e);
+      toast.error("Failed to delete user in Supabase");
     }
   },
 };
 
-// ─── ARTISTS API ─────────────────────────────────────────────────────────────
+// ─── SONGS API (EXTENSIVE MULTI-QUERY CATALOG) ──────────────────────────────
+export const songsApi = {
+  search: async (query: string = "trending"): Promise<Song[]> => {
+    try {
+      const q = query.trim().toLowerCase();
+      
+      // Preset queries for rich multi-search catalog
+      let queryList: string[] = [];
+      if (q === "trending" || q === "all" || q === "") {
+        queryList = [
+          "trending hindi",
+          "punjabi hits",
+          "latest hindi",
+          "latest punjabi",
+          "sidhu moose wala",
+          "arijit singh",
+          "karan aujla",
+          "diljit dosanjh",
+          "shubh",
+          "ap dhillon",
+        ];
+      } else if (q === "punjabi") {
+        queryList = [
+          "punjabi hits",
+          "latest punjabi",
+          "sidhu moose wala",
+          "karan aujla",
+          "diljit dosanjh",
+          "shubh",
+          "ap dhillon",
+          "b praak",
+          "gurinder gill",
+          "amrit maan",
+        ];
+      } else if (q === "hindi") {
+        queryList = [
+          "hindi hits",
+          "latest hindi",
+          "arijit singh",
+          "pritam",
+          "shreya ghoshal",
+          "badshah",
+          "jubin nautiyal",
+          "neha kakkar",
+          "king",
+          "yoyo honey singh",
+        ];
+      } else {
+        queryList = [q];
+      }
+
+      // Execute queries in parallel
+      const responses = await Promise.all(
+        queryList.map((term) => fetchJioSaavn(`/search/songs?query=${encodeURIComponent(term)}&limit=40`))
+      );
+
+      const map = new Map<string, Song>();
+      for (const json of responses) {
+        const rawList = json?.results || json?.data?.results || json?.data || [];
+        if (Array.isArray(rawList)) {
+          rawList.forEach((item) => {
+            const mapped = mapJioSaavnSong(item);
+            if (mapped.id && !map.has(mapped.id)) {
+              map.set(mapped.id, mapped);
+            }
+          });
+        }
+      }
+
+      return Array.from(map.values());
+    } catch (e) {
+      console.error("JioSaavn search songs error:", e);
+      return [];
+    }
+  },
+
+  getAll: async (): Promise<Song[]> => {
+    return songsApi.search("trending");
+  },
+
+  getById: async (id: string): Promise<Song | null> => {
+    try {
+      const json = await fetchJioSaavn(`/songs?id=${id}`);
+      const rawList = json?.results || json?.data?.results || json?.data || [];
+      const item = Array.isArray(rawList) ? rawList[0] : rawList;
+      return item ? mapJioSaavnSong(item) : null;
+    } catch (e) {
+      console.error("JioSaavn get song by id error:", e);
+      return null;
+    }
+  },
+
+  create: async (song: Omit<Song, "id">, _skipNotification?: boolean): Promise<Song> => {
+    toast.info("Catalog is live via JioSaavn API");
+    return { ...song, id: `s-${Date.now()}` };
+  },
+
+  update: async (_id: string, _updates: Partial<Song>): Promise<void> => {
+    toast.info("Catalog is live via JioSaavn API");
+  },
+
+  delete: async (_id: string): Promise<void> => {
+    toast.info("Catalog is live via JioSaavn API");
+  },
+};
+
+// ─── ARTISTS API (JIOSAAVN LIVE EXPLORER) ───────────────────────────────────
 export const artistsApi = {
+  search: async (query: string = "arijit"): Promise<Artist[]> => {
+    try {
+      const q = query.trim() || "arijit";
+      const json = await fetchJioSaavn(`/search/all?query=${encodeURIComponent(q)}`);
+      
+      const rawList = json?.results?.artists?.data || json?.data?.artists?.data || json?.results || json?.data || [];
+      if (Array.isArray(rawList)) {
+        return rawList.map(mapJioSaavnArtist);
+      }
+      return [];
+    } catch (e) {
+      console.error("JioSaavn search artists error:", e);
+      return [];
+    }
+  },
+
   getAll: async (): Promise<Artist[]> => {
-    return fetchFromSupabase<Artist>("artists", mockArtists, (r: any) => ({
-      id: String(r.id),
-      name: r.name || "Unknown Artist",
-      image_url: r.image_url || "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?q=80&w=600&h=600",
-      verified: Boolean(r.verified),
-      monthly_listeners: Number(r.monthly_listeners ?? 0),
-      created_at: r.created_at,
-    }));
+    return artistsApi.search("arijit");
   },
 
   create: async (artist: Omit<Artist, "id">): Promise<Artist> => {
-    const payload = {
-      name: artist.name,
-      image_url: artist.image_url || "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?q=80&w=600&h=600",
-      verified: Boolean(artist.verified),
-      monthly_listeners: Number(artist.monthly_listeners ?? 0),
-    };
-    try {
-      const { data, error } = await supabase.from("artists").insert([payload]).select().single();
-      if (error) throw error;
-      return {
-        id: String(data.id),
-        name: data.name,
-        image_url: data.image_url,
-        verified: Boolean(data.verified),
-        monthly_listeners: Number(data.monthly_listeners),
-        created_at: data.created_at,
-      };
-    } catch (e) {
-      console.error("Supabase create artist failed:", e);
-      return { ...artist, id: `a-${Date.now()}` };
-    }
+    toast.info("Catalog is live via JioSaavn API");
+    return { ...artist, id: `a-${Date.now()}` };
   },
 
-  update: async (id: string, updates: Partial<Artist>): Promise<void> => {
-    try {
-      const payload: any = {};
-      if (updates.name !== undefined) payload.name = updates.name;
-      if (updates.image_url !== undefined) payload.image_url = updates.image_url;
-      if (updates.verified !== undefined) payload.verified = updates.verified;
-      if (updates.monthly_listeners !== undefined) payload.monthly_listeners = updates.monthly_listeners;
-
-      const { error } = await supabase.from("artists").update(payload).eq("id", id);
-      if (error) throw error;
-    } catch (e) {
-      console.error("Supabase update artist failed:", e);
-    }
+  update: async (_id: string, _updates: Partial<Artist>): Promise<void> => {
+    toast.info("Catalog is live via JioSaavn API");
   },
 
-  delete: async (id: string): Promise<void> => {
-    try {
-      const { error } = await supabase.from("artists").delete().eq("id", id);
-      if (error) throw error;
-    } catch (e) {
-      console.error("Supabase delete artist failed:", e);
-    }
+  delete: async (_id: string): Promise<void> => {
+    toast.info("Catalog is live via JioSaavn API");
   },
 };
 
-// ─── ALBUMS API (With Ultra-Premium Expo Push Notification) ────────────────────
+// ─── ALBUMS API (JIOSAAVN LIVE EXPLORER) ────────────────────────────────────
 export const albumsApi = {
+  search: async (query: string = "trending"): Promise<Album[]> => {
+    try {
+      const q = query.trim() || "trending";
+      const json = await fetchJioSaavn(`/search/albums?query=${encodeURIComponent(q)}&limit=40`);
+      
+      const rawList = json?.results || json?.data?.results || json?.data || [];
+      if (Array.isArray(rawList)) {
+        return rawList.map(mapJioSaavnAlbum);
+      }
+      return [];
+    } catch (e) {
+      console.error("JioSaavn search albums error:", e);
+      return [];
+    }
+  },
+
   getAll: async (): Promise<Album[]> => {
-    return fetchFromSupabase<Album>("albums", mockAlbums, (r: any) => ({
-      id: String(r.id),
-      title: r.title || "Untitled Album",
-      artist_id: String(r.artist_id || ""),
-      artist_name: r.artist_name || "Unknown Artist",
-      cover_url: r.cover_url || "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?q=80&w=600&h=600",
-      release_year: Number(r.release_year ?? 2024),
-      created_at: r.created_at,
-    }));
+    return albumsApi.search("trending");
   },
 
   create: async (album: Omit<Album, "id">): Promise<Album> => {
-    const payload = {
-      title: album.title,
-      artist_id: album.artist_id,
-      artist_name: album.artist_name || "Unknown Artist",
-      cover_url: album.cover_url || "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?q=80&w=600&h=600",
-      release_year: Number(album.release_year ?? 2024),
-    };
-    try {
-      const { data, error } = await supabase.from("albums").insert([payload]).select().single();
-      if (error) throw error;
-      
-      const newAlbum: Album = {
-        id: String(data.id),
-        title: data.title,
-        artist_id: String(data.artist_id),
-        artist_name: data.artist_name,
-        cover_url: data.cover_url,
-        release_year: Number(data.release_year),
-        created_at: data.created_at,
-      };
-
-      // 🚀 Dispatch Premium Mobile Notification
-      sendExpoPushNotification({
-        title: "📀 NEW ALBUM RELEASE",
-        subtitle: `${newAlbum.artist_name} · Musify Exclusive`,
-        body: `🔥 "${newAlbum.title}" by ${newAlbum.artist_name} is out now! Stream in Lossless Audio 🎧`,
-        data: {
-          type: "album_release",
-          albumId: newAlbum.id,
-          artistName: newAlbum.artist_name,
-          title: newAlbum.title,
-          coverUrl: newAlbum.cover_url,
-        },
-      });
-
-      return newAlbum;
-    } catch (e) {
-      console.error("Supabase create album failed:", e);
-      return { ...album, id: `al-${Date.now()}` };
-    }
+    toast.info("Catalog is live via JioSaavn API");
+    return { ...album, id: `al-${Date.now()}` };
   },
 
-  update: async (id: string, updates: Partial<Album>): Promise<void> => {
-    try {
-      const payload: any = {};
-      if (updates.title !== undefined) payload.title = updates.title;
-      if (updates.artist_id !== undefined) payload.artist_id = updates.artist_id;
-      if (updates.artist_name !== undefined) payload.artist_name = updates.artist_name;
-      if (updates.cover_url !== undefined) payload.cover_url = updates.cover_url;
-      if (updates.release_year !== undefined) payload.release_year = updates.release_year;
-
-      const { error } = await supabase.from("albums").update(payload).eq("id", id);
-      if (error) throw error;
-    } catch (e) {
-      console.error("Supabase update album failed:", e);
-    }
+  update: async (_id: string, _updates: Partial<Album>): Promise<void> => {
+    toast.info("Catalog is live via JioSaavn API");
   },
 
-  delete: async (id: string): Promise<void> => {
-    try {
-      const { error } = await supabase.from("albums").delete().eq("id", id);
-      if (error) throw error;
-    } catch (e) {
-      console.error("Supabase delete album failed:", e);
-    }
+  delete: async (_id: string): Promise<void> => {
+    toast.info("Catalog is live via JioSaavn API");
   },
 };
 
-// ─── SONGS API ───────────────────────────────────────────────────────────────
-export const songsApi = {
-  getAll: async (): Promise<Song[]> => {
-    return fetchFromSupabase<Song>("songs", mockSongs, (r: any) => ({
-      id: String(r.id),
-      title: r.title || "Untitled Song",
-      artist_id: String(r.artist_id || ""),
-      artist_name: r.artist_name || "Unknown Artist",
-      album_id: r.album_id ? String(r.album_id) : "",
-      album_name: r.album_name || "Single",
-      cover_url: r.cover_url || "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?q=80&w=600&h=600",
-      audio_url: r.audio_url || "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
-      duration: Number(r.duration ?? 180.0),
-      language: r.language || "Hindi",
-      created_at: r.created_at,
-    }));
-  },
-
-  create: async (song: Omit<Song, "id">, skipNotification?: boolean): Promise<Song> => {
-    const payload = {
-      title: song.title,
-      artist_id: song.artist_id,
-      artist_name: song.artist_name || "Unknown Artist",
-      album_id: song.album_id && song.album_id.trim() !== "" ? song.album_id : null,
-      album_name: song.album_id && song.album_id.trim() !== "" ? song.album_name : "Single",
-      cover_url: song.cover_url || "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?q=80&w=600&h=600",
-      audio_url: song.audio_url || "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
-      duration: Number(song.duration ?? 180.0),
-      language: song.language || "Hindi",
-    };
-    try {
-      const { data, error } = await supabase.from("songs").insert([payload]).select().single();
-      if (error) throw error;
-
-      const newSong: Song = {
-        id: String(data.id),
-        title: data.title,
-        artist_id: String(data.artist_id),
-        artist_name: data.artist_name,
-        album_id: data.album_id ? String(data.album_id) : "",
-        album_name: data.album_name || "Single",
-        cover_url: data.cover_url,
-        audio_url: data.audio_url,
-        duration: Number(data.duration),
-        language: data.language || payload.language,
-        created_at: data.created_at,
-      };
-
-      // 🚀 Dispatch Premium Track Notification
-      if (!skipNotification) {
-        sendExpoPushNotification({
-          title: "🎵 FRESH TRACK DROPPED",
-          subtitle: `${newSong.artist_name} · ${newSong.language || "Trending"}`,
-          body: `✨ "${newSong.title}" is now live on Musify. Tap to listen! 🎧`,
-          data: {
-            type: "song_release",
-            songId: newSong.id,
-            artistName: newSong.artist_name,
-            title: newSong.title,
-            coverUrl: newSong.cover_url,
-          },
-        });
-      }
-
-      return newSong;
-    } catch (e) {
-      console.error("Supabase create song failed:", e);
-      return { ...song, id: `s-${Date.now()}` };
-    }
-  },
-
-  update: async (id: string, updates: Partial<Song>): Promise<void> => {
-    try {
-      const payload: any = {};
-      if (updates.title !== undefined) payload.title = updates.title;
-      if (updates.artist_id !== undefined) payload.artist_id = updates.artist_id;
-      if (updates.artist_name !== undefined) payload.artist_name = updates.artist_name;
-      if (updates.album_id !== undefined) {
-        payload.album_id = updates.album_id && updates.album_id.trim() !== "" ? updates.album_id : null;
-        payload.album_name = updates.album_id && updates.album_id.trim() !== "" ? updates.album_name : "Single";
-      }
-      if (updates.cover_url !== undefined) payload.cover_url = updates.cover_url;
-      if (updates.audio_url !== undefined) payload.audio_url = updates.audio_url;
-      if (updates.duration !== undefined) payload.duration = updates.duration;
-      if (updates.language !== undefined) payload.language = updates.language;
-
-      const { error } = await supabase.from("songs").update(payload).eq("id", id);
-      if (error) throw error;
-    } catch (e) {
-      console.error("Supabase update song failed:", e);
-    }
-  },
-
-  delete: async (id: string): Promise<void> => {
-    try {
-      const { error } = await supabase.from("songs").delete().eq("id", id);
-      if (error) throw error;
-    } catch (e) {
-      console.error("Supabase delete song failed:", e);
-    }
-  },
-};
-
-// ─── PLAYLISTS API ───────────────────────────────────────────────────────────
+// ─── PLAYLISTS API (SUPABASE + JIOSAAVN STRING IDs) ─────────────────────────
 export const playlistsApi = {
   getAll: async (): Promise<Playlist[]> => {
     try {
@@ -431,7 +426,7 @@ export const playlistsApi = {
       return [];
     } catch (e) {
       console.warn("Supabase fetch playlists error:", e);
-      return mockPlaylists;
+      return [];
     }
   },
 
@@ -470,7 +465,7 @@ export const playlistsApi = {
       try {
         const junctionPayload = songIds.map((sid) => ({
           playlist_id: createdId,
-          song_id: sid,
+          song_id: String(sid),
         }));
         await supabase.from("playlist_songs").insert(junctionPayload);
       } catch (e) {
@@ -497,7 +492,7 @@ export const playlistsApi = {
         if (songIds.length > 0) {
           const junctionPayload = songIds.map((sid) => ({
             playlist_id: id,
-            song_id: sid,
+            song_id: String(sid),
           }));
           await supabase.from("playlist_songs").insert(junctionPayload);
         }
@@ -516,7 +511,7 @@ export const playlistsApi = {
   },
 };
 
-// ─── STORAGE API ─────────────────────────────────────────────────────────────
+// ─── STORAGE API (SUPABASE STORAGE) ──────────────────────────────────────────
 export const storageApi = {
   uploadFile: async (bucket: "covers" | "audio", file: File): Promise<string> => {
     try {
@@ -589,15 +584,20 @@ export const notificationsApi = {
   },
 };
 
-// ─── HERO BANNERS API ──────────────────────────────────────────────────────
+// ─── HERO BANNERS API (SUPABASE) ───────────────────────────────────────────
 export const heroBannersApi = {
   getAll: async () => {
-    const { data, error } = await supabase
-      .from("hero_banners")
-      .select("*")
-      .order("created_at", { ascending: false });
-    if (error) throw error;
-    return data as HeroBanner[];
+    try {
+      const { data, error } = await supabase
+        .from("hero_banners")
+        .select("*")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return data as HeroBanner[];
+    } catch (e) {
+      console.warn("Supabase fetch hero_banners error:", e);
+      return [];
+    }
   },
   create: async (banner: Omit<HeroBanner, "id" | "created_at">) => {
     const { data, error } = await supabase
